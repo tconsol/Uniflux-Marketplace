@@ -1,0 +1,9 @@
+fastapi
+uvicorn[standard]
+motor
+pydantic
+pydantic-settings
+python-jose[cryptography]
+jobspy
+pandas
+pymongo
