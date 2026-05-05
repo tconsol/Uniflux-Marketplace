@@ -7,3 +7,4 @@ python-jose[cryptography]
 jobspy
 pandas
 pymongo
+py-eureka-client
