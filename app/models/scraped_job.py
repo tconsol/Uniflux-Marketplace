@@ -42,24 +42,18 @@ class SalaryModel(BaseModel):
 class ScrapedJob(BaseModel):
     id: Optional[str] = None
     org_id: str
-
     source_site: str
     external_id: Optional[str] = None
-
     title: Optional[str] = None
     company_name: Optional[str] = None
     company_url: Optional[str] = None
-
     location: LocationModel
     salary: SalaryModel
-
     job_type: Optional[str] = None
     description: Optional[str] = None
     posted_at: Optional[datetime] = None
     url: Optional[str] = None
-
     skills: List[str] = Field(default_factory=list)
-
     scraped_at: datetime
     raw: Dict[str, Any] = Field(default_factory=dict)
 
@@ -76,3 +70,19 @@ class ScrapedJob(BaseModel):
 class ScrapedJobListResponse(BaseModel):
     total: int
     jobs: List[ScrapedJob]
+
+
+class SiteFetchMeta(BaseModel):
+    org_id: str
+    site: str
+    last_fetched_at: datetime
+    last_keywords: Optional[str] = None
+    last_location: Optional[str] = None
+
+
+class FetchStatusResponse(BaseModel):
+    site: str
+    last_fetched_at: Optional[datetime]
+    next_allowed_at: Optional[datetime]
+    can_fetch: bool
+    hours_old: Optional[int]

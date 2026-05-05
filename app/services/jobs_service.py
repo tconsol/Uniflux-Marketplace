@@ -1,8 +1,7 @@
-from datetime import datetime, date
-from typing import List
+from datetime import datetime, timedelta, date
+from typing import List, Optional
 
 import pandas as pd
-from bson import ObjectId
 
 from app.database import get_db
 from app.models.scraped_job import (
@@ -11,15 +10,14 @@ from app.models.scraped_job import (
     LocationModel,
     SalaryModel,
     ScrapedJobListResponse,
+    FetchStatusResponse,
 )
 from app.services.jobspy_service import jobspy_search
 
+FETCH_COOLDOWN_MINUTES = 15
+
 
 def _normalize_dates(data: dict) -> dict:
-    """
-    Ensure any datetime.date values are converted to datetime.datetime
-    so Mongo/PyMongo can encode them.
-    """
     for k, v in list(data.items()):
         if isinstance(v, date) and not isinstance(v, datetime):
             data[k] = datetime.combine(v, datetime.min.time())
@@ -34,7 +32,6 @@ def _row_to_scraped_job(row: pd.Series, org_id: str) -> ScrapedJob:
         country=row.get("country"),
         is_remote=bool(row.get("is_remote", False)),
     )
-
     salary = SalaryModel(
         min=row.get("min_amount"),
         max=row.get("max_amount"),
@@ -42,7 +39,6 @@ def _row_to_scraped_job(row: pd.Series, org_id: str) -> ScrapedJob:
         interval=row.get("interval"),
         source=row.get("salary_source"),
     )
-
     posted_at = None
     dt = row.get("date_posted")
     if isinstance(dt, datetime):
@@ -51,7 +47,7 @@ def _row_to_scraped_job(row: pd.Series, org_id: str) -> ScrapedJob:
         try:
             posted_at = datetime.fromisoformat(dt)
         except ValueError:
-            posted_at = None
+            pass
 
     external_id = row.get("job_id") or row.get("id")
 
@@ -63,8 +59,6 @@ def _row_to_scraped_job(row: pd.Series, org_id: str) -> ScrapedJob:
         skills = [s.strip() for s in raw_skills.split(",") if s.strip()]
 
     source_site = str(row.get("site", row.get("source", "")))
-
-    # Normalize raw dict so it does not contain bare datetime.date values
     raw_dict = _normalize_dates(row.to_dict())
 
     return ScrapedJob(
@@ -86,49 +80,135 @@ def _row_to_scraped_job(row: pd.Series, org_id: str) -> ScrapedJob:
     )
 
 
-async def search_and_store_jobs(payload: JobSearchRequest, org_id: str) -> ScrapedJobListResponse:
-    df = jobspy_search(payload)
-    if df.empty:
-        return ScrapedJobListResponse(total=0, jobs=[])
-
+async def _get_fetch_meta(org_id: str, site: str) -> Optional[dict]:
     db = get_db()
-    jobs_coll = db.scraped_jobs
+    return await db.site_fetch_meta.find_one({"org_id": org_id, "site": site})
 
-    jobs: List[ScrapedJob] = []
 
-    for _, row in df.iterrows():
-        job = _row_to_scraped_job(row, org_id=org_id)
+async def _update_fetch_meta(org_id: str, site: str, keywords: str, location: str):
+    db = get_db()
+    await db.site_fetch_meta.update_one(
+        {"org_id": org_id, "site": site},
+        {"$set": {
+            "last_fetched_at": datetime.utcnow(),
+            "last_keywords": keywords,
+            "last_location": location,
+        }},
+        upsert=True,
+    )
 
-        # Simple de-dupe: org_id + source_site + external_id
-        query = {
-            "org_id": org_id,
-            "source_site": job.source_site,
-            "external_id": job.external_id,
-        }
 
-        existing = await jobs_coll.find_one(query)
-        if existing:
-            await jobs_coll.update_one(
-                {"_id": existing["_id"]},
-                {"$set": {**job.model_dump(exclude={"id"}), "updated_at": datetime.utcnow()}},
-            )
-            job.id = str(existing["_id"])
+def _hours_since(dt: datetime) -> int:
+    delta = datetime.utcnow() - dt
+    return max(int(delta.total_seconds() / 3600), 1)
+
+
+async def get_fetch_status(org_id: str, sites: List[str]) -> List[FetchStatusResponse]:
+    result = []
+    for site in sites:
+        meta = await _get_fetch_meta(org_id, site)
+        if not meta:
+            result.append(FetchStatusResponse(
+                site=site,
+                last_fetched_at=None,
+                next_allowed_at=None,
+                can_fetch=True,
+                hours_old=None,
+            ))
         else:
-            doc = job.model_dump(exclude={"id"})
-            doc["created_at"] = datetime.utcnow()
-            result = await jobs_coll.insert_one(doc)
-            job.id = str(result.inserted_id)
+            last = meta["last_fetched_at"]
+            next_allowed = last + timedelta(minutes=FETCH_COOLDOWN_MINUTES)
+            can_fetch = datetime.utcnow() >= next_allowed
+            result.append(FetchStatusResponse(
+                site=site,
+                last_fetched_at=last,
+                next_allowed_at=next_allowed,
+                can_fetch=can_fetch,
+                hours_old=_hours_since(last) if can_fetch else None,
+            ))
+    return result
 
-        jobs.append(job)
 
-    return ScrapedJobListResponse(total=len(jobs), jobs=jobs)
+async def search_and_store_jobs(payload: JobSearchRequest, org_id: str) -> ScrapedJobListResponse:
+    db = get_db()
+    jobs_coll = db.scraped_jobs
+    all_jobs: List[ScrapedJob] = []
+    now = datetime.utcnow()
+    cooldown = timedelta(minutes=FETCH_COOLDOWN_MINUTES)
+
+    for site in payload.sites:
+        meta = await _get_fetch_meta(org_id, site)
+        if meta:
+            last = meta["last_fetched_at"]
+            if now - last < cooldown:
+                continue
+
+        hours_old = _hours_since(meta["last_fetched_at"]) if meta else (payload.hours_old or 72)
+
+        single_payload = payload.model_copy(update={"sites": [site], "hours_old": hours_old})
+        df = jobspy_search(single_payload)
+
+        if not df.empty:
+            for _, row in df.iterrows():
+                job = _row_to_scraped_job(row, org_id=org_id)
+                query = {
+                    "org_id": org_id,
+                    "source_site": job.source_site,
+                    "external_id": job.external_id,
+                }
+                existing = await jobs_coll.find_one(query)
+                if existing:
+                    await jobs_coll.update_one(
+                        {"_id": existing["_id"]},
+                        {"$set": {**job.model_dump(exclude={"id"}), "updated_at": now}},
+                    )
+                    job.id = str(existing["_id"])
+                else:
+                    doc = job.model_dump(exclude={"id"})
+                    doc["created_at"] = now
+                    result = await jobs_coll.insert_one(doc)
+                    job.id = str(result.inserted_id)
+                all_jobs.append(job)
+
+        await _update_fetch_meta(org_id, site, payload.keywords, payload.location)
+
+    return ScrapedJobListResponse(total=len(all_jobs), jobs=all_jobs)
 
 
-async def list_scraped_jobs(org_id: str, limit: int = 100) -> ScrapedJobListResponse:
+async def list_scraped_jobs(
+    org_id: str,
+    limit: int = 50,           # 50 per page, no cap
+    skip: int = 0,
+    keyword: Optional[str] = None,
+    location: Optional[str] = None,
+    job_type: Optional[str] = None,
+    site: Optional[str] = None,
+    skills: Optional[str] = None,
+) -> ScrapedJobListResponse:
     db = get_db()
     jobs_coll = db.scraped_jobs
 
-    cursor = jobs_coll.find({"org_id": org_id}).sort("created_at", -1).limit(limit)
+    query: dict = {"org_id": org_id}
+
+    if keyword:
+        query["$or"] = [
+            {"title": {"$regex": keyword, "$options": "i"}},
+            {"company_name": {"$regex": keyword, "$options": "i"}},
+        ]
+    if location:
+        query["location.raw"] = {"$regex": location, "$options": "i"}
+    if job_type:
+        query["job_type"] = {"$regex": job_type, "$options": "i"}
+    if site:
+        query["source_site"] = site
+    if skills:
+        skill_list = [s.strip() for s in skills.split(",") if s.strip()]
+        if skill_list:
+            query["skills"] = {"$in": skill_list}
+
+    # Returns real total count regardless of limit/skip
+    total = await jobs_coll.count_documents(query)
+    cursor = jobs_coll.find(query).sort("scraped_at", -1).skip(skip).limit(limit)
     docs = await cursor.to_list(length=limit)
 
     jobs: List[ScrapedJob] = []
@@ -153,4 +233,4 @@ async def list_scraped_jobs(org_id: str, limit: int = 100) -> ScrapedJobListResp
         )
         jobs.append(job)
 
-    return ScrapedJobListResponse(total=len(jobs), jobs=jobs)
+    return ScrapedJobListResponse(total=total, jobs=jobs)
