@@ -21,7 +21,7 @@ class Settings(BaseSettings):
 
     # Eureka
     EUREKA_SERVER: str = "http://localhost:8761/eureka"
-    EUREKA_HOST: str = "localhost"
+    EUREKA_HOST: str = ""
 
     # Proxy
     PROXY_URL: Optional[str] = None    # ← added

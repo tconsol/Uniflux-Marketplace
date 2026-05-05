@@ -1,6 +1,7 @@
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 import py_eureka_client.eureka_client as eureka_client
 import logging
 
@@ -12,21 +13,24 @@ logger = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # ── Startup: register with Eureka ──
+    # ── Startup ──
     try:
         await eureka_client.init_async(
             eureka_server=settings.EUREKA_SERVER,
-            app_name="marketplace-service",   # must match gateway uri("lb://marketplace-service")
+            app_name="marketplace-service",
             instance_port=settings.APP_PORT,
             instance_host=settings.EUREKA_HOST,
         )
-        logger.info("✅ Registered with Eureka as 'marketplace-service' on port %d", settings.APP_PORT)
+        logger.info(
+            "✅ Registered with Eureka as 'marketplace-service' on port %d",
+            settings.APP_PORT
+        )
     except Exception as e:
         logger.warning("⚠️ Eureka registration failed: %s", e)
 
     yield
 
-    # ── Shutdown: deregister ──
+    # ── Shutdown ──
     try:
         await eureka_client.stop_async()
         logger.info("✅ Deregistered from Eureka")
@@ -41,14 +45,14 @@ def create_app() -> FastAPI:
         lifespan=lifespan,
     )
 
-    # CORS — allow shell + all MFEs
     app.add_middleware(
         CORSMiddleware,
         allow_origins=[
-            "http://localhost:5173",   # shell
-            "http://localhost:5174",   # other MFEs
-            "http://localhost:5175",   # marketplace MFE
+            "http://localhost:5173",
+            "http://localhost:5174",
+            "http://localhost:5175",
             "http://localhost:5176",
+            settings.FRONTEND_URL,
         ],
         allow_credentials=True,
         allow_methods=["*"],
@@ -56,6 +60,14 @@ def create_app() -> FastAPI:
     )
 
     app.include_router(jobs_router)
+
+    @app.get("/health", tags=["Health"])
+    async def health():
+        return JSONResponse({
+            "status": "ok",
+            "service": "marketplace-service",
+            "env": settings.APP_ENV,
+        })
 
     return app
 
