@@ -23,6 +23,8 @@ class Settings(BaseSettings):
     EUREKA_SERVER: str = "http://localhost:8761/eureka"
     EUREKA_HOST: str = ""
 
+    FRONTEND_URL: str = "http://localhost:8085"
+
     # Proxy
     PROXY_URL: Optional[str] = None    # ← added
 
