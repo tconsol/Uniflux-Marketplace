@@ -18,10 +18,9 @@ async def lifespan(app: FastAPI):
         await eureka_client.init_async(
             eureka_server=settings.EUREKA_SERVER,
             app_name="marketplace-service",
-            instance_port=settings.APP_PORT,
-            instance_host=settings.EUREKA_HOST,  # must be the Cloud Run hostname
-            instance_ip=settings.EUREKA_HOST,  # ← add this line
-
+            instance_port=443,  # ← was: settings.APP_PORT (8085)
+            instance_host=settings.EUREKA_HOST,
+            instance_ip=settings.EUREKA_HOST,
         )
         logger.info(
             "✅ Registered with Eureka as 'marketplace-service' on port %d",
