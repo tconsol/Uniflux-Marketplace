@@ -3,7 +3,7 @@ from typing import List, Optional
 
 
 class Settings(BaseSettings):
-    APP_NAME: str = "marketplace"
+    APP_NAME: str = "marketplace-service"
     APP_ENV: str = "development"
     APP_PORT: int = 8085
 
