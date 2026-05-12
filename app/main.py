@@ -18,7 +18,7 @@ async def lifespan(app: FastAPI):
         await eureka_client.init_async(
             eureka_server=settings.EUREKA_SERVER,
             app_name="marketplace-service",
-            instance_port=443,  # ← was: settings.APP_PORT (8085)
+            instance_port=443 if settings.APP_ENV == "production" else settings.APP_PORT,
             instance_host=settings.EUREKA_HOST,
             instance_ip=settings.EUREKA_HOST,
         )
