@@ -18,9 +18,17 @@ async def lifespan(app: FastAPI):
         await eureka_client.init_async(
             eureka_server=settings.EUREKA_SERVER,
             app_name="marketplace-service",
-            instance_port=443 if settings.APP_ENV == "production" else settings.APP_PORT,
             instance_host=settings.EUREKA_HOST,
             instance_ip=settings.EUREKA_HOST,
+
+            # ✅ Always register with actual container port
+            instance_port=settings.APP_PORT,  # 8085
+            instance_port_enabled=True,
+
+            # ✅ Tell Eureka the home/health URLs use HTTPS (Cloud Run)
+            home_page_url=f"https://{settings.EUREKA_HOST}/",
+            status_page_url=f"https://{settings.EUREKA_HOST}/health",
+            health_check_url=f"https://{settings.EUREKA_HOST}/health",
         )
         logger.info(
             "✅ Registered with Eureka as 'marketplace-service' on port %d",
