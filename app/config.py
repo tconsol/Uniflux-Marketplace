@@ -1,4 +1,5 @@
 from pydantic_settings import BaseSettings
+from pydantic import field_validator
 from typing import List, Optional
 
 
@@ -26,7 +27,18 @@ class Settings(BaseSettings):
     FRONTEND_URL: str = "http://localhost:8085"
 
     # Proxy
-    PROXY_URL: Optional[str] = None    # ← added
+    PROXY_URL: Optional[str] = None
+
+    @field_validator("JOBSPY_DEFAULT_SITES", mode="before")
+    @classmethod
+    def parse_sites(cls, v):
+        if isinstance(v, str):
+            v = v.strip()
+            if v.startswith("["):
+                import json
+                return json.loads(v)
+            return [s.strip() for s in v.split(",")]
+        return v
 
     class Config:
         env_file = ".env"
