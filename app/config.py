@@ -1,5 +1,4 @@
 from pydantic_settings import BaseSettings
-from pydantic import field_validator
 from typing import List, Optional
 
 
@@ -18,7 +17,7 @@ class Settings(BaseSettings):
 
     # JobSpy defaults
     JOBSPY_MAX_RESULTS: int = 100
-    JOBSPY_DEFAULT_SITES: List[str] = ["indeed", "glassdoor", "google"]
+    JOBSPY_DEFAULT_SITES: str = "indeed,glassdoor,google"  # always a plain string
 
     # Eureka
     EUREKA_SERVER: str = "http://localhost:8761/eureka"
@@ -29,16 +28,9 @@ class Settings(BaseSettings):
     # Proxy
     PROXY_URL: Optional[str] = None
 
-    @field_validator("JOBSPY_DEFAULT_SITES", mode="before")
-    @classmethod
-    def parse_sites(cls, v):
-        if isinstance(v, str):
-            v = v.strip()
-            if v.startswith("["):
-                import json
-                return json.loads(v)
-            return [s.strip() for s in v.split(",")]
-        return v
+    @property
+    def jobspy_sites(self) -> List[str]:
+        return [s.strip() for s in self.JOBSPY_DEFAULT_SITES.split(",")]
 
     class Config:
         env_file = ".env"
