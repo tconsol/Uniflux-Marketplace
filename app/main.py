@@ -17,7 +17,7 @@ async def lifespan(app: FastAPI):
     try:
         await eureka_client.init_async(
             eureka_server=settings.EUREKA_SERVER,
-            app_name="marketplace-service",
+            app_name="MARKETPLACE-SERVICE",
             instance_host=settings.EUREKA_HOST,
             instance_ip=settings.EUREKA_HOST,
 
