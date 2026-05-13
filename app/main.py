@@ -19,7 +19,7 @@ async def lifespan(app: FastAPI):
             eureka_server=settings.EUREKA_SERVER,
             app_name="MARKETPLACE-SERVICE",
             instance_host=settings.EUREKA_HOST,
-            instance_ip=settings.EUREKA_HOST,
+            # ❌ Remove instance_ip — it's causing the malformed instance ID
             instance_port=443,
             home_page_url=f"https://{settings.EUREKA_HOST}/",
             status_page_url=f"https://{settings.EUREKA_HOST}/health",
