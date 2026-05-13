@@ -20,19 +20,19 @@ async def lifespan(app: FastAPI):
             app_name="MARKETPLACE-SERVICE",
             instance_host=settings.EUREKA_HOST,
             instance_ip=settings.EUREKA_HOST,
-
-            # ✅ Always register with actual container port
-            instance_port=settings.APP_PORT,  # 8085
-            instance_port_enabled=True,
-
-            # ✅ Tell Eureka the home/health URLs use HTTPS (Cloud Run)
+            instance_port=443,
             home_page_url=f"https://{settings.EUREKA_HOST}/",
             status_page_url=f"https://{settings.EUREKA_HOST}/health",
             health_check_url=f"https://{settings.EUREKA_HOST}/health",
+            renewal_interval_in_secs=30,
+            duration_in_secs=90,
+            metadata={
+                "version": "0.1.0",
+                "env": settings.APP_ENV,
+            }
         )
         logger.info(
-            "✅ Registered with Eureka as 'marketplace-service' on port %d",
-            settings.APP_PORT
+            "✅ Registered with Eureka as 'MARKETPLACE-SERVICE' on port 443"
         )
     except Exception as e:
         logger.warning("⚠️ Eureka registration failed: %s", e)
@@ -45,7 +45,6 @@ async def lifespan(app: FastAPI):
         logger.info("✅ Deregistered from Eureka")
     except Exception:
         pass
-
 
 def create_app() -> FastAPI:
     app = FastAPI(
