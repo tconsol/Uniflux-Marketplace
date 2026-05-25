@@ -1,11 +1,12 @@
 from datetime import datetime, timedelta, date
-from typing import List, Optional
+from typing import List, Optional, Dict, Any
 
 import pandas as pd
 
 from app.database import get_db
 from app.models.scraped_job import (
     JobSearchRequest,
+    JSearchRequest,
     ScrapedJob,
     LocationModel,
     SalaryModel,
@@ -13,6 +14,7 @@ from app.models.scraped_job import (
     FetchStatusResponse,
 )
 from app.services.jobspy_service import jobspy_search
+from app.services.jsearch_service import jsearch_search, jsearch_search_v2
 
 FETCH_COOLDOWN_MINUTES = 15
 
@@ -22,6 +24,29 @@ def _normalize_dates(data: dict) -> dict:
         if isinstance(v, date) and not isinstance(v, datetime):
             data[k] = datetime.combine(v, datetime.min.time())
     return data
+
+
+def _hours_since(dt: datetime) -> int:
+    delta = datetime.utcnow() - dt
+    return max(int(delta.total_seconds() / 3600), 1)
+
+
+async def _get_fetch_meta(org_id: str, site: str) -> Optional[dict]:
+    db = get_db()
+    return await db.site_fetch_meta.find_one({"org_id": org_id, "site": site})
+
+
+async def _update_fetch_meta(org_id: str, site: str, keywords: str, location: str):
+    db = get_db()
+    await db.site_fetch_meta.update_one(
+        {"org_id": org_id, "site": site},
+        {"$set": {
+            "last_fetched_at": datetime.utcnow(),
+            "last_keywords": keywords,
+            "last_location": location,
+        }},
+        upsert=True,
+    )
 
 
 def _row_to_scraped_job(row: pd.Series, org_id: str) -> ScrapedJob:
@@ -39,6 +64,7 @@ def _row_to_scraped_job(row: pd.Series, org_id: str) -> ScrapedJob:
         interval=row.get("interval"),
         source=row.get("salary_source"),
     )
+
     posted_at = None
     dt = row.get("date_posted")
     if isinstance(dt, datetime):
@@ -80,27 +106,78 @@ def _row_to_scraped_job(row: pd.Series, org_id: str) -> ScrapedJob:
     )
 
 
-async def _get_fetch_meta(org_id: str, site: str) -> Optional[dict]:
-    db = get_db()
-    return await db.site_fetch_meta.find_one({"org_id": org_id, "site": site})
+def _jsearch_job_to_scraped(raw: Dict[str, Any], org_id: str) -> ScrapedJob:
+    location = LocationModel(
+        raw=raw.get("job_location") or ", ".join(filter(None, [
+            raw.get("job_city"),
+            raw.get("job_state"),
+            raw.get("job_country"),
+        ])),
+        city=raw.get("job_city"),
+        state=raw.get("job_state"),
+        country=raw.get("job_country"),
+        is_remote=bool(raw.get("job_is_remote", False)),
+    )
 
+    salary = SalaryModel(
+        min=raw.get("job_min_salary"),
+        max=raw.get("job_max_salary"),
+        currency=raw.get("job_salary_currency"),
+        interval=raw.get("job_salary_period"),
+        source="jsearch",
+    )
 
-async def _update_fetch_meta(org_id: str, site: str, keywords: str, location: str):
-    db = get_db()
-    await db.site_fetch_meta.update_one(
-        {"org_id": org_id, "site": site},
-        {"$set": {
-            "last_fetched_at": datetime.utcnow(),
-            "last_keywords": keywords,
-            "last_location": location,
-        }},
-        upsert=True,
+    posted_at: Optional[datetime] = None
+    raw_ts = raw.get("job_posted_at_datetime_utc")
+    if raw_ts:
+        try:
+            posted_at = datetime.fromisoformat(raw_ts.replace("Z", "+00:00"))
+        except ValueError:
+            pass
+
+    highlights = raw.get("job_highlights") or {}
+    qualifications = highlights.get("Qualifications", [])
+    if not isinstance(qualifications, list):
+        qualifications = []
+
+    return ScrapedJob(
+        org_id=org_id,
+        source_site="jsearch",
+        external_id=raw.get("job_id"),
+        title=raw.get("job_title"),
+        company_name=raw.get("employer_name"),
+        company_url=raw.get("employer_website"),
+        location=location,
+        salary=salary,
+        job_type=raw.get("job_employment_type"),
+        description=raw.get("job_description"),
+        posted_at=posted_at,
+        url=raw.get("job_apply_link") or raw.get("job_google_link"),
+        skills=[str(x) for x in qualifications],
+        scraped_at=datetime.utcnow(),
+        raw=raw,
     )
 
 
-def _hours_since(dt: datetime) -> int:
-    delta = datetime.utcnow() - dt
-    return max(int(delta.total_seconds() / 3600), 1)
+async def _upsert_job(jobs_coll, job: ScrapedJob, org_id: str, now: datetime) -> ScrapedJob:
+    query = {
+        "org_id": org_id,
+        "source_site": job.source_site,
+        "external_id": job.external_id,
+    }
+    existing = await jobs_coll.find_one(query)
+    if existing:
+        await jobs_coll.update_one(
+            {"_id": existing["_id"]},
+            {"$set": {**job.model_dump(exclude={"id"}), "updated_at": now}},
+        )
+        job.id = str(existing["_id"])
+    else:
+        doc = job.model_dump(exclude={"id"})
+        doc["created_at"] = now
+        result = await jobs_coll.insert_one(doc)
+        job.id = str(result.inserted_id)
+    return job
 
 
 async def get_fetch_status(org_id: str, sites: List[str]) -> List[FetchStatusResponse]:
@@ -151,23 +228,7 @@ async def search_and_store_jobs(payload: JobSearchRequest, org_id: str) -> Scrap
         if not df.empty:
             for _, row in df.iterrows():
                 job = _row_to_scraped_job(row, org_id=org_id)
-                query = {
-                    "org_id": org_id,
-                    "source_site": job.source_site,
-                    "external_id": job.external_id,
-                }
-                existing = await jobs_coll.find_one(query)
-                if existing:
-                    await jobs_coll.update_one(
-                        {"_id": existing["_id"]},
-                        {"$set": {**job.model_dump(exclude={"id"}), "updated_at": now}},
-                    )
-                    job.id = str(existing["_id"])
-                else:
-                    doc = job.model_dump(exclude={"id"})
-                    doc["created_at"] = now
-                    result = await jobs_coll.insert_one(doc)
-                    job.id = str(result.inserted_id)
+                job = await _upsert_job(jobs_coll, job, org_id, now)
                 all_jobs.append(job)
 
         await _update_fetch_meta(org_id, site, payload.keywords, payload.location)
@@ -175,9 +236,60 @@ async def search_and_store_jobs(payload: JobSearchRequest, org_id: str) -> Scrap
     return ScrapedJobListResponse(total=len(all_jobs), jobs=all_jobs)
 
 
+async def search_and_store_jsearch_jobs(payload: JSearchRequest, org_id: str) -> ScrapedJobListResponse:
+    db = get_db()
+    jobs_coll = db.scraped_jobs
+    all_jobs: List[ScrapedJob] = []
+    now = datetime.utcnow()
+    cooldown = timedelta(minutes=FETCH_COOLDOWN_MINUTES)
+
+    meta = await _get_fetch_meta(org_id, "jsearch")
+    if meta and (now - meta["last_fetched_at"]) < cooldown:
+        return await list_scraped_jobs(org_id=org_id, site="jsearch")
+
+    query = f"{payload.keywords} in {payload.location}"
+
+    if payload.use_cursor:
+        raw_jobs, _ = await jsearch_search_v2(
+            query=query,
+            num_pages=payload.num_pages,
+            cursor=payload.cursor,
+            country=payload.country,
+            language=payload.language,
+            date_posted=payload.date_posted,
+            work_from_home=payload.work_from_home,
+            employment_types=payload.employment_types,
+            job_requirements=payload.job_requirements,
+            radius=payload.radius,
+            exclude_job_publishers=payload.exclude_job_publishers,
+        )
+    else:
+        raw_jobs = await jsearch_search(
+            query=query,
+            num_pages=payload.num_pages,
+            country=payload.country,
+            language=payload.language,
+            date_posted=payload.date_posted,
+            work_from_home=payload.work_from_home,
+            employment_types=payload.employment_types,
+            job_requirements=payload.job_requirements,
+            radius=payload.radius,
+            exclude_job_publishers=payload.exclude_job_publishers,
+        )
+
+    for raw in raw_jobs:
+        job = _jsearch_job_to_scraped(raw, org_id=org_id)
+        job = await _upsert_job(jobs_coll, job, org_id, now)
+        all_jobs.append(job)
+
+    await _update_fetch_meta(org_id, "jsearch", payload.keywords, payload.location)
+
+    return ScrapedJobListResponse(total=len(all_jobs), jobs=all_jobs)
+
+
 async def list_scraped_jobs(
     org_id: str,
-    limit: int = 50,           # 50 per page, no cap
+    limit: int = 50,
     skip: int = 0,
     keyword: Optional[str] = None,
     location: Optional[str] = None,
@@ -206,7 +318,6 @@ async def list_scraped_jobs(
         if skill_list:
             query["skills"] = {"$in": skill_list}
 
-    # Returns real total count regardless of limit/skip
     total = await jobs_coll.count_documents(query)
     cursor = jobs_coll.find(query).sort("scraped_at", -1).skip(skip).limit(limit)
     docs = await cursor.to_list(length=limit)

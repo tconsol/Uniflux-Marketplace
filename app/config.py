@@ -19,6 +19,7 @@ class Settings(BaseSettings):
     JOBSPY_MAX_RESULTS: int = 100
     JOBSPY_DEFAULT_SITES: str = "indeed,glassdoor,google"
     PROXY_URL: str = ""
+    RAPIDAPI_KEY: str = ""
 
     # CORS
     FRONTEND_URL: str = "http://localhost:5173"

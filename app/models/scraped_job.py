@@ -22,6 +22,22 @@ class JobSearchRequest(BaseModel):
             self.sites = default_sites
         return self
 
+# Append to app/models/scraped_job.py
+class JSearchRequest(BaseModel):
+    keywords: str = Field(..., min_length=2)
+    location: str = Field(..., min_length=2)   # included in query string: "{keywords} in {location}"
+    num_pages: int = Field(1, ge=1, le=20)
+    country: str = Field("us", min_length=2, max_length=2)   # ISO 3166-1 alpha-2
+    language: Optional[str] = None
+    date_posted: Literal["all", "today", "3days", "week", "month"] = "all"
+    work_from_home: bool = False
+    employment_types: Optional[str] = None     # "FULLTIME,PARTTIME,INTERN,CONTRACTOR"
+    job_requirements: Optional[str] = None     # "under_3_years_experience,no_degree" etc.
+    radius: Optional[float] = None             # km
+    exclude_job_publishers: Optional[str] = None
+    use_cursor: bool = False                   # True → /search-v2, False → /search
+    cursor: Optional[str] = None              # pass previous response cursor for v2 pagination
+
 
 class LocationModel(BaseModel):
     raw: Optional[str] = None
