@@ -1,0 +1,214 @@
+import logging
+from datetime import datetime
+from typing import Any, Dict, Optional
+
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
+from apscheduler.triggers.interval import IntervalTrigger
+
+from app.database import get_db
+from app.models.scraped_job import (
+    JSearchRequest,
+    JSearchSchedulerConfig,
+    JSearchSchedulerStatusResponse,
+)
+from app.services.jobs_service import search_and_store_jsearch_jobs
+
+logger = logging.getLogger(__name__)
+
+JSEARCH_SCHEDULER_JOB_ID = "jsearch_auto_pull"
+
+scheduler = AsyncIOScheduler(timezone="UTC")
+
+
+async def init_jsearch_scheduler() -> None:
+    if not scheduler.running:
+        scheduler.start()
+        logger.info("JSearch scheduler started")
+
+
+async def shutdown_jsearch_scheduler() -> None:
+    if scheduler.running:
+        scheduler.shutdown(wait=False)
+        logger.info("JSearch scheduler stopped")
+
+
+async def _save_scheduler_state(
+    org_id: str,
+    enabled: bool,
+    config: Optional[Dict[str, Any]] = None,
+    last_run_at: Optional[datetime] = None,
+    last_result: Optional[Dict[str, Any]] = None,
+) -> None:
+    db = get_db()
+    update_doc: Dict[str, Any] = {"enabled": enabled, "updated_at": datetime.utcnow()}
+    if config is not None:
+        update_doc["config"] = config
+    if last_run_at is not None:
+        update_doc["last_run_at"] = last_run_at
+    if last_result is not None:
+        update_doc["last_result"] = last_result
+
+    await db.jsearch_scheduler_meta.update_one(
+        {"org_id": org_id},
+        {"$set": update_doc},
+        upsert=True,
+    )
+
+
+async def _get_scheduler_state(org_id: str) -> Optional[dict]:
+    db = get_db()
+    return await db.jsearch_scheduler_meta.find_one({"org_id": org_id})
+
+
+async def _run_jsearch_tick(org_id: str) -> None:
+    state = await _get_scheduler_state(org_id)
+    if not state or not state.get("enabled") or not state.get("config"):
+        logger.info("Scheduler tick skipped org_id=%s because scheduler is disabled", org_id)
+        return
+
+    config = JSearchSchedulerConfig(**state["config"])
+    payload = JSearchRequest(
+        keywords=config.keywords,
+        location=config.location,
+        country=config.country,
+        language=config.language,
+        num_pages=config.num_pages,
+        date_posted=config.date_posted,
+        work_from_home=config.work_from_home,
+        employment_types=config.employment_types,
+        job_requirements=config.job_requirements,
+        radius=config.radius,
+        exclude_job_publishers=config.exclude_job_publishers,
+        use_cursor=config.use_cursor,
+    )
+
+    logger.info("Running scheduled JSearch tick org_id=%s", org_id)
+
+    try:
+        result = await search_and_store_jsearch_jobs(payload, org_id=org_id)
+        await _save_scheduler_state(
+            org_id=org_id,
+            enabled=True,
+            last_run_at=datetime.utcnow(),
+            last_result={
+                "fetched_count": result.fetched_count,
+                "stored_count": result.stored_count,
+                "new_count": result.new_count,
+                "updated_count": getattr(result, "updated_count", result.stored_count - result.new_count),
+                "next_cursor": result.next_cursor,
+            },
+        )
+    except Exception as exc:
+        logger.exception("Scheduled JSearch tick failed org_id=%s", org_id)
+        await _save_scheduler_state(
+            org_id=org_id,
+            enabled=True,
+            last_run_at=datetime.utcnow(),
+            last_result={"error": str(exc)},
+        )
+
+
+async def start_jsearch_scheduler_for_org(
+    org_id: str,
+    config: JSearchSchedulerConfig,
+) -> JSearchSchedulerStatusResponse:
+    await init_jsearch_scheduler()
+
+    job_id = f"{JSEARCH_SCHEDULER_JOB_ID}:{org_id}"
+    existing = scheduler.get_job(job_id)
+    if existing:
+        scheduler.remove_job(job_id)
+
+    scheduler.add_job(
+        _run_jsearch_tick,
+        trigger=IntervalTrigger(minutes=config.interval_minutes),
+        id=job_id,
+        kwargs={"org_id": org_id},
+        replace_existing=True,
+        max_instances=1,
+        coalesce=True,
+    )
+
+    await _save_scheduler_state(
+        org_id=org_id,
+        enabled=True,
+        config=config.model_dump(),
+    )
+
+    job = scheduler.get_job(job_id)
+
+    return JSearchSchedulerStatusResponse(
+        enabled=True,
+        running=job is not None,
+        job_id=job_id,
+        interval_minutes=config.interval_minutes,
+        next_run_at=job.next_run_time if job else None,
+        last_run_at=None,
+        last_result=None,
+        config=config,
+    )
+
+
+async def stop_jsearch_scheduler_for_org(org_id: str) -> JSearchSchedulerStatusResponse:
+    job_id = f"{JSEARCH_SCHEDULER_JOB_ID}:{org_id}"
+    job = scheduler.get_job(job_id)
+    if job:
+        scheduler.remove_job(job_id)
+
+    state = await _get_scheduler_state(org_id)
+    await _save_scheduler_state(org_id=org_id, enabled=False)
+
+    config = None
+    interval_minutes = 5
+    last_run_at = None
+    last_result = None
+
+    if state:
+        raw_config = state.get("config")
+        if raw_config:
+            config = JSearchSchedulerConfig(**raw_config)
+            interval_minutes = config.interval_minutes
+        last_run_at = state.get("last_run_at")
+        last_result = state.get("last_result")
+
+    return JSearchSchedulerStatusResponse(
+        enabled=False,
+        running=False,
+        job_id=job_id,
+        interval_minutes=interval_minutes,
+        next_run_at=None,
+        last_run_at=last_run_at,
+        last_result=last_result,
+        config=config,
+    )
+
+
+async def get_jsearch_scheduler_status_for_org(org_id: str) -> JSearchSchedulerStatusResponse:
+    job_id = f"{JSEARCH_SCHEDULER_JOB_ID}:{org_id}"
+    job = scheduler.get_job(job_id)
+    state = await _get_scheduler_state(org_id)
+
+    config = None
+    interval_minutes = 5
+    enabled = False
+    last_run_at = None
+    last_result = None
+
+    if state:
+        enabled = bool(state.get("enabled", False))
+        if state.get("config"):
+            config = JSearchSchedulerConfig(**state["config"])
+            interval_minutes = config.interval_minutes
+        last_run_at = state.get("last_run_at")
+        last_result = state.get("last_result")
+
+    return JSearchSchedulerStatusResponse(
+        enabled=enabled,
+        running=job is not None,
+        job_id=job_id,
+        interval_minutes=interval_minutes,
+        next_run_at=job.next_run_time if job else None,
+        last_run_at=last_run_at,
+        last_result=last_result,
+        config=config,
+    )

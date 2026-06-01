@@ -7,14 +7,19 @@ from app.routers.jobs import router as jobs_router
 from app.eureka_client import register_with_eureka, deregister_from_eureka
 from app.config import settings
 
+from app.services.jsearch_scheduler_service import (
+    init_jsearch_scheduler,
+    shutdown_jsearch_scheduler,
+)
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # ── Startup ──
+    await init_jsearch_scheduler()
     await register_with_eureka()
     yield
-    # ── Shutdown ──
     await deregister_from_eureka()
+    await shutdown_jsearch_scheduler()
 
 
 app = FastAPI(
