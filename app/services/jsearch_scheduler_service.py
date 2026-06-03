@@ -63,50 +63,67 @@ async def _get_scheduler_state(org_id: str) -> Optional[dict]:
 async def _run_jsearch_tick(org_id: str) -> None:
     state = await _get_scheduler_state(org_id)
     if not state or not state.get("enabled") or not state.get("config"):
-        logger.info("Scheduler tick skipped org_id=%s because scheduler is disabled", org_id)
+        logger.info("Scheduler tick skipped org_id=%s — scheduler disabled", org_id)
         return
 
     config = JSearchSchedulerConfig(**state["config"])
-    payload = JSearchRequest(
-        keywords=config.keywords,
-        location=config.location,
-        country=config.country,
-        language=config.language,
-        num_pages=config.num_pages,
-        date_posted=config.date_posted,
-        work_from_home=config.work_from_home,
-        employment_types=config.employment_types,
-        job_requirements=config.job_requirements,
-        radius=config.radius,
-        exclude_job_publishers=config.exclude_job_publishers,
-        use_cursor=config.use_cursor,
+
+    total_fetched = 0
+    total_new = 0
+    total_stored = 0
+    errors = []
+
+    for keyword in config.keywords:
+        payload = JSearchRequest(
+            keywords=keyword,
+            location=config.location,
+            country=config.country,
+            language=config.language,
+            num_pages=config.num_pages,
+            date_posted=config.date_posted,
+            work_from_home=config.work_from_home,
+            employment_types=config.employment_types,
+            job_requirements=config.job_requirements,
+            radius=config.radius,
+            exclude_job_publishers=config.exclude_job_publishers,
+            use_cursor=config.use_cursor,
+        )
+
+        logger.info(
+            "Scheduler tick keyword=%s org_id=%s location=%s",
+            keyword, org_id, config.location,
+        )
+
+        try:
+            result = await search_and_store_jsearch_jobs(payload, org_id=org_id)
+            total_fetched += result.fetched_count
+            total_stored += result.stored_count
+            total_new += result.new_count
+        except Exception as exc:
+            logger.exception(
+                "Scheduler tick failed keyword=%s org_id=%s", keyword, org_id
+            )
+            errors.append({"keyword": keyword, "error": str(exc)})
+
+    last_result = {
+        "total_fetched": total_fetched,
+        "total_stored": total_stored,
+        "total_new": total_new,
+        "keywords_run": len(config.keywords),
+        "errors": errors,
+    }
+
+    logger.info(
+        "Scheduler tick complete org_id=%s fetched=%d stored=%d new=%d errors=%d",
+        org_id, total_fetched, total_stored, total_new, len(errors),
     )
 
-    logger.info("Running scheduled JSearch tick org_id=%s", org_id)
-
-    try:
-        result = await search_and_store_jsearch_jobs(payload, org_id=org_id)
-        await _save_scheduler_state(
-            org_id=org_id,
-            enabled=True,
-            last_run_at=datetime.utcnow(),
-            last_result={
-                "fetched_count": result.fetched_count,
-                "stored_count": result.stored_count,
-                "new_count": result.new_count,
-                "updated_count": getattr(result, "updated_count", result.stored_count - result.new_count),
-                "next_cursor": result.next_cursor,
-            },
-        )
-    except Exception as exc:
-        logger.exception("Scheduled JSearch tick failed org_id=%s", org_id)
-        await _save_scheduler_state(
-            org_id=org_id,
-            enabled=True,
-            last_run_at=datetime.utcnow(),
-            last_result={"error": str(exc)},
-        )
-
+    await _save_scheduler_state(
+        org_id=org_id,
+        enabled=True,
+        last_run_at=datetime.utcnow(),
+        last_result=last_result,
+    )
 
 async def start_jsearch_scheduler_for_org(
     org_id: str,

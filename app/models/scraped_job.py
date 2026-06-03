@@ -115,7 +115,24 @@ class FetchStatusResponse(BaseModel):
     hours_old: Optional[int]
 
 class JSearchSchedulerConfig(BaseModel):
-    keywords: str = Field(..., min_length=2)
+    keywords: List[str] = Field(
+        default=[
+            "Software Engineer",
+            "Software Developer",
+            "Data Engineer",
+            "DevOps Engineer",
+            "Cloud Engineer",
+            "Data Scientist",
+            "Machine Learning Engineer",
+            "Cybersecurity",
+            "Network Engineer",
+            "IT Support",
+            "Database Administrator",
+            "UI UX Designer",
+            "Product Manager",
+            "QA Engineer",
+        ]
+    )
     location: str = Field(..., min_length=2)
     country: str = Field("us", min_length=2, max_length=2)
     language: Optional[str] = None
@@ -127,7 +144,7 @@ class JSearchSchedulerConfig(BaseModel):
     radius: Optional[float] = None
     exclude_job_publishers: Optional[str] = None
     use_cursor: bool = False
-    interval_minutes: int = Field(5, ge=1, le=1440)
+    interval_minutes: int = Field(60, ge=1, le=1440)
 
 
 class JSearchSchedulerStatusResponse(BaseModel):
