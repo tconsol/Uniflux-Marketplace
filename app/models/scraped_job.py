@@ -75,7 +75,10 @@ class ScrapedJob(BaseModel):
 
     @model_validator(mode="before")
     @classmethod
-    def sanitize_nan(cls, values: dict) -> dict:
+    def sanitize_nan(cls, values):
+        if not isinstance(values, dict):
+            return values
+
         def clean(v):
             if isinstance(v, float) and math.isnan(v):
                 return None
@@ -101,6 +104,8 @@ class JSearchFetchResponse(BaseModel):
 class SiteFetchMeta(BaseModel):
     org_id: str
     site: str
+    keywords: Optional[str] = None
+    location: Optional[str] = None
     last_fetched_at: datetime
     last_keywords: Optional[str] = None
     last_location: Optional[str] = None
@@ -114,9 +119,10 @@ class FetchStatusResponse(BaseModel):
     can_fetch: bool
     hours_old: Optional[int]
 
+
 class JSearchSchedulerConfig(BaseModel):
     keywords: List[str] = Field(
-        default=[
+        default_factory=lambda: [
             "Software Engineer",
             "Software Developer",
             "Data Engineer",
@@ -156,3 +162,41 @@ class JSearchSchedulerStatusResponse(BaseModel):
     last_run_at: Optional[datetime] = None
     last_result: Optional[Dict[str, Any]] = None
     config: Optional[JSearchSchedulerConfig] = None
+
+
+class IndeedSchedulerConfig(BaseModel):
+    keywords: List[str] = Field(
+        default_factory=lambda: [
+            "Software Engineer",
+            "Software Developer",
+            "Data Engineer",
+            "DevOps Engineer",
+            "Cloud Engineer",
+            "Data Scientist",
+            "Machine Learning Engineer",
+            "Cybersecurity",
+            "Network Engineer",
+            "IT Support",
+            "Database Administrator",
+            "UI UX Designer",
+            "Product Manager",
+            "QA Engineer",
+        ]
+    )
+    location: str = Field(..., min_length=2)
+    country_indeed: Optional[str] = None
+    results_wanted: int = Field(50, ge=1, le=200)
+    hours_old: Optional[int] = Field(72, ge=1, le=720)
+    remote_only: bool = False
+    interval_minutes: int = Field(2, ge=1, le=1440)
+
+
+class IndeedSchedulerStatusResponse(BaseModel):
+    enabled: bool
+    running: bool
+    job_id: str
+    interval_minutes: int
+    next_run_at: Optional[datetime] = None
+    last_run_at: Optional[datetime] = None
+    last_result: Optional[Dict[str, Any]] = None
+    config: Optional[IndeedSchedulerConfig] = None

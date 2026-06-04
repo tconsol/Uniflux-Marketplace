@@ -37,9 +37,28 @@ def _hours_since(dt: datetime) -> int:
     return max(int(delta.total_seconds() / 3600), 1)
 
 
-async def _get_fetch_meta(org_id: str, site: str) -> Optional[dict]:
+async def _get_fetch_meta(
+    org_id: str,
+    site: str,
+    keywords: Optional[str] = None,
+    location: Optional[str] = None,
+) -> Optional[dict]:
     db = get_db()
-    return await db.site_fetch_meta.find_one({"org_id": org_id, "site": site})
+
+    if site == "indeed" and keywords is not None and location is not None:
+        query: Dict[str, Any] = {
+            "org_id": org_id,
+            "site": site,
+            "keywords": keywords,
+            "location": location,
+        }
+    else:
+        query = {
+            "org_id": org_id,
+            "site": site,
+        }
+
+    return await db.site_fetch_meta.find_one(query)
 
 
 async def _update_fetch_meta(
@@ -50,16 +69,31 @@ async def _update_fetch_meta(
     next_cursor: Optional[str] = None,
 ):
     db = get_db()
+
+    if site == "indeed":
+        query: Dict[str, Any] = {
+            "org_id": org_id,
+            "site": site,
+            "keywords": keywords,
+            "location": location,
+        }
+    else:
+        query = {
+            "org_id": org_id,
+            "site": site,
+        }
+
     update_data: Dict[str, Any] = {
         "last_fetched_at": datetime.utcnow(),
         "last_keywords": keywords,
         "last_location": location,
     }
+
     if next_cursor is not None:
         update_data["last_cursor"] = next_cursor
 
     await db.site_fetch_meta.update_one(
-        {"org_id": org_id, "site": site},
+        query,
         {"$set": update_data},
         upsert=True,
     )
@@ -254,7 +288,16 @@ async def get_fetch_status(org_id: str, sites: List[str]) -> List[FetchStatusRes
     result = []
 
     for site in sites:
-        meta = await _get_fetch_meta(org_id, site)
+        db = get_db()
+
+        if site == "indeed":
+            meta = await db.site_fetch_meta.find_one(
+                {"org_id": org_id, "site": site},
+                sort=[("last_fetched_at", -1)],
+            )
+        else:
+            meta = await _get_fetch_meta(org_id, site)
+
         if not meta:
             result.append(
                 FetchStatusResponse(
@@ -292,11 +335,26 @@ async def search_and_store_jobs(payload: JobSearchRequest, org_id: str) -> Scrap
     cooldown = timedelta(minutes=FETCH_COOLDOWN_MINUTES)
 
     for site in payload.sites:
-        meta = await _get_fetch_meta(org_id, site)
+        if site == "indeed":
+            meta = await _get_fetch_meta(
+                org_id,
+                site,
+                keywords=payload.keywords,
+                location=payload.location,
+            )
+        else:
+            meta = await _get_fetch_meta(org_id, site)
+
         if meta:
             last = meta["last_fetched_at"]
             if now - last < cooldown:
-                logger.info("Skipping %s due to cooldown for org=%s", site, org_id)
+                logger.info(
+                    "Skipping %s due to cooldown for org=%s keyword=%s location=%s",
+                    site,
+                    org_id,
+                    payload.keywords,
+                    payload.location,
+                )
                 continue
 
         hours_old = _hours_since(meta["last_fetched_at"]) if meta else (payload.hours_old or 72)
@@ -309,7 +367,12 @@ async def search_and_store_jobs(payload: JobSearchRequest, org_id: str) -> Scrap
                 job, _ = await _upsert_job(jobs_coll, job, org_id, now)
                 all_jobs.append(job)
 
-        await _update_fetch_meta(org_id, site, payload.keywords, payload.location)
+        await _update_fetch_meta(
+            org_id=org_id,
+            site=site,
+            keywords=payload.keywords,
+            location=payload.location,
+        )
 
     return ScrapedJobListResponse(total=len(all_jobs), jobs=all_jobs)
 
@@ -363,7 +426,6 @@ async def search_and_store_jsearch_jobs(payload: JSearchRequest, org_id: str) ->
 
     stored_jobs: List[ScrapedJob] = []
     new_count = 0
-
 
     for raw in raw_jobs:
         job = _jsearch_job_to_scraped(raw, org_id=org_id)
@@ -493,7 +555,7 @@ async def get_job_counts(
         "parttime",
         "internship",
     ]
-    all_sites = ["google", "glassdoor", "zip_recruiter", "jsearch"]
+    all_sites = ["google", "glassdoor", "zip_recruiter", "indeed", "jsearch"]
 
     async def count(extra: Dict[str, Any] = {}) -> int:
         return await jobs_coll.count_documents({**base_query, **extra})
