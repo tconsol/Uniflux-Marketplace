@@ -36,6 +36,26 @@ from app.services.jsearch_scheduler_service import (
 
 router = APIRouter(prefix="/api/v1/marketplace/jobs", tags=["Marketplace Jobs"])
 
+@router.get("/public", response_model=ScrapedJobListResponse)
+async def get_public_scraped_jobs(
+    limit: int = Query(50, ge=1, le=100),
+    skip: int = Query(0, ge=0),
+    keyword: Optional[str] = Query(None),
+    location: Optional[str] = Query(None),
+    job_type: Optional[str] = Query(None),
+    site: Optional[str] = Query(None),
+    skills: Optional[str] = Query(None),
+):
+    return await list_scraped_jobs(
+        org_id=None,
+        limit=limit,
+        skip=skip,
+        keyword=keyword,
+        location=location,
+        job_type=job_type,
+        site=site,
+        skills=skills,
+    )
 
 @router.post("/search", response_model=ScrapedJobListResponse)
 async def search_jobs(

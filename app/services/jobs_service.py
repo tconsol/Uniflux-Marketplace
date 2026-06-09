@@ -461,9 +461,8 @@ async def search_and_store_jsearch_jobs(payload: JSearchRequest, org_id: str) ->
         jobs=stored_jobs,
     )
 
-
 async def list_scraped_jobs(
-    org_id: str,
+    org_id: Optional[str] = None,
     limit: int = 50,
     skip: int = 0,
     keyword: Optional[str] = None,
@@ -475,19 +474,26 @@ async def list_scraped_jobs(
     db = get_db()
     jobs_coll = db.scraped_jobs
 
-    query: Dict[str, Any] = {"org_id": org_id}
+    query: Dict[str, Any] = {}
+
+    if org_id:
+        query["org_id"] = org_id
 
     if keyword:
         query["$or"] = [
             {"title": {"$regex": keyword, "$options": "i"}},
             {"company_name": {"$regex": keyword, "$options": "i"}},
         ]
+
     if location:
         query["location.raw"] = {"$regex": location, "$options": "i"}
+
     if job_type:
         query["job_type"] = {"$regex": job_type, "$options": "i"}
+
     if site:
         query["source_site"] = site
+
     if skills:
         skill_list = [s.strip() for s in skills.split(",") if s.strip()]
         if skill_list:
@@ -521,7 +527,6 @@ async def list_scraped_jobs(
         )
 
     return ScrapedJobListResponse(total=total, jobs=jobs)
-
 
 async def get_job_counts(
     org_id: str,
