@@ -600,27 +600,37 @@ async def get_all_public_jobs() -> ScrapedJobListResponse:
     jobs_coll = db.scraped_jobs
 
     total = await jobs_coll.count_documents({})
-    docs = await jobs_coll.find({}).sort("scraped_at", -1).to_list(length=None)
+    cursor = jobs_coll.find({}).sort("scraped_at", -1)
+    docs = await cursor.to_list(length=None)
 
     jobs: List[ScrapedJob] = []
+
     for doc in docs:
+        location_data = doc.get("location") or {}
+        salary_data = doc.get("salary") or {}
+
+        if not isinstance(location_data, dict):
+            location_data = {}
+        if not isinstance(salary_data, dict):
+            salary_data = {}
+
         jobs.append(
             ScrapedJob(
-                id=str(doc["_id"]),
-                org_id=doc["org_id"],
+                id=str(doc.get("_id")),
+                org_id=doc.get("org_id", ""),
                 source_site=doc.get("source_site", ""),
                 external_id=doc.get("external_id"),
                 title=doc.get("title"),
                 company_name=doc.get("company_name"),
                 company_url=doc.get("company_url"),
-                location=LocationModel(**doc.get("location", {})),
-                salary=SalaryModel(**doc.get("salary", {})),
+                location=LocationModel(**location_data),
+                salary=SalaryModel(**salary_data),
                 job_type=doc.get("job_type"),
                 description=doc.get("description"),
                 posted_at=doc.get("posted_at"),
                 url=doc.get("url"),
                 skills=doc.get("skills", []),
-                scraped_at=doc.get("scraped_at", doc.get("created_at", datetime.utcnow())),
+                scraped_at=doc.get("scraped_at") or doc.get("created_at") or datetime.utcnow(),
                 raw=doc.get("raw", {}),
             )
         )
