@@ -593,3 +593,36 @@ async def get_job_counts(
         "sites": sites,
         "siteJobTypes": site_job_types,
     }
+
+
+async def get_all_public_jobs() -> ScrapedJobListResponse:
+    db = get_db()
+    jobs_coll = db.scraped_jobs
+
+    total = await jobs_coll.count_documents({})
+    docs = await jobs_coll.find({}).sort("scraped_at", -1).to_list(length=None)
+
+    jobs: List[ScrapedJob] = []
+    for doc in docs:
+        jobs.append(
+            ScrapedJob(
+                id=str(doc["_id"]),
+                org_id=doc["org_id"],
+                source_site=doc.get("source_site", ""),
+                external_id=doc.get("external_id"),
+                title=doc.get("title"),
+                company_name=doc.get("company_name"),
+                company_url=doc.get("company_url"),
+                location=LocationModel(**doc.get("location", {})),
+                salary=SalaryModel(**doc.get("salary", {})),
+                job_type=doc.get("job_type"),
+                description=doc.get("description"),
+                posted_at=doc.get("posted_at"),
+                url=doc.get("url"),
+                skills=doc.get("skills", []),
+                scraped_at=doc.get("scraped_at", doc.get("created_at", datetime.utcnow())),
+                raw=doc.get("raw", {}),
+            )
+        )
+
+    return ScrapedJobListResponse(total=total, jobs=jobs)
