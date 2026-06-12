@@ -600,6 +600,9 @@ async def get_all_public_jobs() -> ScrapedJobListResponse:
 
     docs = await jobs_coll.find({}).to_list(length=None)  # NO sort
 
+    docs = await jobs_coll.find({}).to_list(length=None)
+    print(f"[DEBUG] Docs fetched: {len(docs)}")
+
     jobs: List[ScrapedJob] = []
     for doc in docs:
         location_data = doc.get("location") or {}
