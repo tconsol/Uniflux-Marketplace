@@ -1,13 +1,18 @@
-FROM node:20-slim
-
+FROM node:20-alpine AS base
 WORKDIR /app
 
+# Install dependencies
 COPY package*.json ./
-RUN npm install --omit=dev
+RUN npm ci --omit=dev
 
-COPY src/ ./src/
-COPY .env ./
+# Copy source
+COPY . .
 
-EXPOSE 3085
+# Remove example env so it doesn't shadow real one
+RUN rm -f .env.example
 
-CMD ["node", "src/app.js"]
+EXPOSE 5000
+
+ENV NODE_ENV=production
+
+CMD ["node", "app.js"]
