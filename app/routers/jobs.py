@@ -38,13 +38,14 @@ router = APIRouter(prefix="/api/v1/marketplace/jobs", tags=["Marketplace Jobs"])
 
 @router.get("/public", response_model=ScrapedJobListResponse)
 async def get_public_scraped_jobs(
-    limit: int = Query(50, ge=1, le=100),
+    limit: int = Query(50, ge=1, le=10000),
     skip: int = Query(0, ge=0),
     keyword: Optional[str] = Query(None),
     location: Optional[str] = Query(None),
     job_type: Optional[str] = Query(None),
     site: Optional[str] = Query(None),
     skills: Optional[str] = Query(None),
+    fetch_all: bool = Query(False),
 ):
     return await list_scraped_jobs(
         org_id=None,
@@ -55,6 +56,7 @@ async def get_public_scraped_jobs(
         job_type=job_type,
         site=site,
         skills=skills,
+        fetch_all=fetch_all,
     )
 
 @router.post("/search", response_model=ScrapedJobListResponse)
@@ -109,13 +111,14 @@ async def job_counts(
 
 @router.get("/", response_model=ScrapedJobListResponse)
 async def get_scraped_jobs(
-    limit: int = Query(50, ge=1, le=100),
+    limit: int = Query(50, ge=1, le=10000),
     skip: int = Query(0, ge=0),
     keyword: Optional[str] = Query(None),
     location: Optional[str] = Query(None),
     job_type: Optional[str] = Query(None),
     site: Optional[str] = Query(None),
     skills: Optional[str] = Query(None),
+    fetch_all: bool = Query(False),
     current_user: CurrentUser = Depends(get_current_user),
 ):
     return await list_scraped_jobs(
@@ -127,6 +130,7 @@ async def get_scraped_jobs(
         job_type=job_type,
         site=site,
         skills=skills,
+        fetch_all=fetch_all,
     )
 
 @router.get("/jsearch/scheduler/status", response_model=JSearchSchedulerStatusResponse)

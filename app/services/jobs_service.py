@@ -1,6 +1,7 @@
 import asyncio
 import logging
 import math
+import re
 from datetime import datetime, timedelta, date
 from typing import List, Optional, Dict, Any, Tuple
 
@@ -23,6 +24,16 @@ from app.services.jsearch_service import jsearch_search, jsearch_search_v2
 logger = logging.getLogger(__name__)
 
 FETCH_COOLDOWN_MINUTES = 15
+
+
+def _flexible_regex(value: str) -> str:
+    """Build regex matching value regardless of case, spaces, hyphens, or underscores.
+    e.g. 'full time' matches 'Full Time', 'Full-Time', 'FULL_TIME', 'fulltime'
+    """
+    normalized = value.strip().lower()
+    words = [w for w in re.split(r'[\s\-_]+', normalized) if w]
+    pattern = r'[\s\-_]*'.join(re.escape(w) for w in words)
+    return pattern
 
 
 def _normalize_dates(data: dict) -> dict:
@@ -470,38 +481,51 @@ async def list_scraped_jobs(
     job_type: Optional[str] = None,
     site: Optional[str] = None,
     skills: Optional[str] = None,
+    fetch_all: bool = False,
 ) -> ScrapedJobListResponse:
     db = get_db()
     jobs_coll = db.scraped_jobs
 
     query: Dict[str, Any] = {}
+    and_conditions: List[Dict[str, Any]] = []
 
     if org_id:
         query["org_id"] = org_id
 
     if keyword:
-        query["$or"] = [
-            {"title": {"$regex": keyword, "$options": "i"}},
-            {"company_name": {"$regex": keyword, "$options": "i"}},
-        ]
+        and_conditions.append({"$or": [
+            {"title": {"$regex": _flexible_regex(keyword), "$options": "i"}},
+            {"company_name": {"$regex": _flexible_regex(keyword), "$options": "i"}},
+        ]})
 
     if location:
-        query["location.raw"] = {"$regex": location, "$options": "i"}
+        query["location.raw"] = {"$regex": _flexible_regex(location), "$options": "i"}
 
     if job_type:
-        query["job_type"] = {"$regex": job_type, "$options": "i"}
+        query["job_type"] = {"$regex": _flexible_regex(job_type), "$options": "i"}
 
     if site:
-        query["source_site"] = site
+        query["source_site"] = site.strip().lower()
 
     if skills:
         skill_list = [s.strip() for s in skills.split(",") if s.strip()]
         if skill_list:
-            query["skills"] = {"$in": skill_list}
+            and_conditions.append({"$or": [
+                {"skills": {"$regex": _flexible_regex(s), "$options": "i"}}
+                for s in skill_list
+            ]})
+
+    if and_conditions:
+        query["$and"] = and_conditions
 
     total = await jobs_coll.count_documents(query)
-    cursor = jobs_coll.find(query).sort("scraped_at", -1).skip(skip).limit(limit)
-    docs = await cursor.to_list(length=limit)
+
+    if fetch_all:
+        cursor = jobs_coll.find(query).sort("scraped_at", -1)
+        docs = await cursor.to_list(length=None)
+    else:
+        cursor = jobs_coll.find(query).sort("scraped_at", -1).skip(skip).limit(limit)
+        docs = await cursor.to_list(length=limit)
 
     jobs: List[ScrapedJob] = []
     for doc in docs:
