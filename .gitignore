@@ -53,3 +53,10 @@ coverage.xml
 # Distribution
 *.pyc
 site/
+
+# Node
+node-server/node_modules/
+node-server/.env
+node-server/*.log
+node-server/dist/
+node-server/build/
