@@ -16,6 +16,7 @@ from app.services.jobs_service import (
     list_scraped_jobs,
     get_fetch_status,
     get_job_counts,
+    get_public_filter_counts,
 )
 
 from app.models.scraped_job import (
@@ -26,6 +27,7 @@ from app.models.scraped_job import (
     FetchStatusResponse,
     JSearchSchedulerConfig,
     JSearchSchedulerStatusResponse,
+    PublicJobCountsResponse,
 )
 from app.services.jsearch_scheduler_service import (
     start_jsearch_scheduler_for_org,
@@ -58,6 +60,23 @@ async def get_public_scraped_jobs(
         skills=skills,
         fetch_all=fetch_all,
     )
+
+@router.get("/public/counts", response_model=PublicJobCountsResponse)
+async def get_public_job_counts(
+    keyword: Optional[str] = Query(None),
+    location: Optional[str] = Query(None),
+    job_type: Optional[str] = Query(None),
+    site: Optional[str] = Query(None),
+    skills: Optional[str] = Query(None),
+):
+    return await get_public_filter_counts(
+        keyword=keyword,
+        location=location,
+        job_type=job_type,
+        site=site,
+        skills=skills,
+    )
+
 
 @router.post("/search", response_model=ScrapedJobListResponse)
 async def search_jobs(

@@ -552,6 +552,70 @@ async def list_scraped_jobs(
 
     return ScrapedJobListResponse(total=total, jobs=jobs)
 
+
+async def get_public_filter_counts(
+    keyword: Optional[str] = None,
+    location: Optional[str] = None,
+    job_type: Optional[str] = None,
+    site: Optional[str] = None,
+    skills: Optional[str] = None,
+):
+    from app.models.scraped_job import PublicJobCountsResponse
+
+    db = get_db()
+    jobs_coll = db.scraped_jobs
+
+    query: Dict[str, Any] = {}
+    and_conditions: List[Dict[str, Any]] = []
+
+    if keyword:
+        and_conditions.append({"$or": [
+            {"title": {"$regex": _flexible_regex(keyword), "$options": "i"}},
+            {"company_name": {"$regex": _flexible_regex(keyword), "$options": "i"}},
+        ]})
+    if location:
+        query["location.raw"] = {"$regex": _flexible_regex(location), "$options": "i"}
+    if job_type:
+        query["job_type"] = {"$regex": _flexible_regex(job_type), "$options": "i"}
+    if site:
+        query["source_site"] = site.strip().lower()
+    if skills:
+        skill_list = [s.strip() for s in skills.split(",") if s.strip()]
+        if skill_list:
+            and_conditions.append({"$or": [
+                {"skills": {"$regex": _flexible_regex(s), "$options": "i"}}
+                for s in skill_list
+            ]})
+    if and_conditions:
+        query["$and"] = and_conditions
+
+    total, site_agg, job_type_agg, skills_agg = await asyncio.gather(
+        jobs_coll.count_documents(query),
+        jobs_coll.aggregate([
+            {"$match": query},
+            {"$group": {"_id": "$source_site", "count": {"$sum": 1}}},
+        ]).to_list(length=None),
+        jobs_coll.aggregate([
+            {"$match": query},
+            {"$group": {"_id": "$job_type", "count": {"$sum": 1}}},
+        ]).to_list(length=None),
+        jobs_coll.aggregate([
+            {"$match": query},
+            {"$unwind": "$skills"},
+            {"$group": {"_id": "$skills", "count": {"$sum": 1}}},
+            {"$sort": {"count": -1}},
+            {"$limit": 50},
+        ]).to_list(length=None),
+    )
+
+    return PublicJobCountsResponse(
+        total=total,
+        by_site={r["_id"]: r["count"] for r in site_agg if r["_id"]},
+        by_job_type={r["_id"]: r["count"] for r in job_type_agg if r["_id"]},
+        by_skills={r["_id"]: r["count"] for r in skills_agg if r["_id"]},
+    )
+
+
 async def get_job_counts(
     org_id: str,
     keyword: Optional[str] = None,

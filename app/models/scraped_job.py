@@ -92,6 +92,13 @@ class ScrapedJobListResponse(BaseModel):
     jobs: List[ScrapedJob]
 
 
+class PublicJobCountsResponse(BaseModel):
+    total: int
+    by_site: Dict[str, int]
+    by_job_type: Dict[str, int]
+    by_skills: Dict[str, int]
+
+
 class JSearchFetchResponse(BaseModel):
     fetched_count: int
     stored_count: int
