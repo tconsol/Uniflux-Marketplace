@@ -32,8 +32,9 @@ async function start() {
   await connectDB();
   await restoreJsearchSchedulers();
   await restoreIndeedSchedulers();
-  app.listen(settings.APP_PORT, () => {
-    console.log(`${settings.APP_NAME} running on port ${settings.APP_PORT}`);
+  const port = process.env.PORT || settings.APP_PORT;
+  app.listen(port, () => {
+    console.log(`${settings.APP_NAME} running on port ${port}`);
   });
 }
 

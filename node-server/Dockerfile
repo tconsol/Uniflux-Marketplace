@@ -11,8 +11,8 @@ COPY . .
 # Remove example env so it doesn't shadow real one
 RUN rm -f .env.example
 
-EXPOSE 5000
+EXPOSE 8080
 
 ENV NODE_ENV=production
 
-CMD ["node", "app.js"]
+CMD ["node", "src/app.js"]
