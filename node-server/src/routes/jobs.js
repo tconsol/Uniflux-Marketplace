@@ -27,14 +27,14 @@ const router = Router();
 // Pagination: pass next_cursor from previous response as cursor param
 router.get('/public', async (req, res) => {
   try {
-    const { keyword, location, job_type, site, skills, cursor } = req.query;
+    const { keyword, location, job_type, site, skills, page = 1 } = req.query;
     const result = await getPublicJobs({
       keyword,
       location,
       jobType: job_type,
       site,
       skills,
-      cursor: cursor || null,
+      page: parseInt(page) || 1,
       limit: 200,
     });
     res.json(result);

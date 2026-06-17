@@ -70,24 +70,25 @@ function buildQuery({ orgId, keyword, location, jobType, site, skills }) {
   return query;
 }
 
-export async function getPublicJobs({ keyword, location, jobType, site, skills, cursor = null, limit = 200 }) {
+export async function getPublicJobs({ keyword, location, jobType, site, skills, page = 1, limit = 200 }) {
   const db = getDB();
   const coll = db.collection('scraped_jobs');
   const query = buildQuery({ orgId: null, keyword, location, jobType, site, skills });
 
-  if (cursor) {
-    try { query._id = { $gt: new ObjectId(cursor) }; } catch {}
-  }
+  const skip = (page - 1) * limit;
+  const total = await coll.countDocuments(query);
+  const totalPages = Math.ceil(total / limit);
 
-  console.log(`[Jobs] getPublicJobs cursor=${cursor} limit=${limit}`);
+  console.log(`[Jobs] getPublicJobs page=${page} limit=${limit} skip=${skip} total=${total}`);
 
-  const docs = await coll.find(query).sort({ _id: 1 }).limit(limit).toArray();
-  const nextCursor = docs.length === limit ? docs[docs.length - 1]._id.toString() : null;
+  const docs = await coll.find(query).sort({ _id: 1 }).skip(skip).limit(limit).toArray();
 
   return {
-    count: docs.length,
-    next_cursor: nextCursor,
-    has_more: nextCursor !== null,
+    total,
+    page,
+    limit,
+    total_pages: totalPages,
+    has_more: page < totalPages,
     jobs: docs.map(docToJob),
   };
 }
