@@ -1,3 +1,4 @@
+import { ObjectId } from 'mongodb';
 import { getDB } from '../database.js';
 import { settings } from '../config/settings.js';
 import { jsearchSearch, jsearchSearchV2 } from './jsearchService.js';
@@ -11,6 +12,29 @@ function flexibleRegex(value) {
   return pattern;
 }
 
+const JOB_TYPE_MAP = {
+  fulltime:        ['full.?time', 'full_time', 'permanent'],
+  parttime:        ['part.?time', 'part_time'],
+  contract:        ['contract(?!_to_hire)', 'contractor', 'freelance', 'c2c', 'corp.?to.?corp', 'w2', 'c2h'],
+  contract_to_hire:['contract.?to.?hire', 'c2h', 'contract_to_hire'],
+  internship:      ['intern(?:ship)?'],
+  temporary:       ['temp(?:orary)?'],
+  perdiem:         ['per.?diem'],
+};
+
+export function normalizeJobType(raw) {
+  if (!raw) return null;
+  const lower = raw.trim().toLowerCase();
+  for (const [standard, patterns] of Object.entries(JOB_TYPE_MAP)) {
+    for (const p of patterns) {
+      if (new RegExp(`^${p}$`, 'i').test(lower) || new RegExp(p, 'i').test(lower)) {
+        return standard;
+      }
+    }
+  }
+  return lower.replace(/[\s\-]+/g, '_');
+}
+
 function buildQuery({ orgId, keyword, location, jobType, site, skills }) {
   const query = {};
   const andConditions = [];
@@ -21,6 +45,7 @@ function buildQuery({ orgId, keyword, location, jobType, site, skills }) {
     andConditions.push({ $or: [
       { title: { $regex: flexibleRegex(keyword), $options: 'i' } },
       { company_name: { $regex: flexibleRegex(keyword), $options: 'i' } },
+      { description: { $regex: flexibleRegex(keyword), $options: 'i' } },
     ]});
   }
 
@@ -32,13 +57,57 @@ function buildQuery({ orgId, keyword, location, jobType, site, skills }) {
     const skillList = skills.split(',').map(s => s.trim()).filter(Boolean);
     if (skillList.length) {
       andConditions.push({ $or: skillList.map(s => ({
-        skills: { $regex: flexibleRegex(s), $options: 'i' },
+        $or: [
+          { skills: { $regex: flexibleRegex(s), $options: 'i' } },
+          { title: { $regex: flexibleRegex(s), $options: 'i' } },
+          { description: { $regex: flexibleRegex(s), $options: 'i' } },
+        ]
       }))});
     }
   }
 
   if (andConditions.length) query.$and = andConditions;
   return query;
+}
+
+export async function getPublicJobs({ keyword, location, jobType, site, skills, cursor = null, limit = 200 }) {
+  const db = getDB();
+  const coll = db.collection('scraped_jobs');
+  const query = buildQuery({ orgId: null, keyword, location, jobType, site, skills });
+
+  if (cursor) {
+    try { query._id = { $gt: new ObjectId(cursor) }; } catch {}
+  }
+
+  console.log(`[Jobs] getPublicJobs cursor=${cursor} limit=${limit}`);
+
+  const docs = await coll.find(query).sort({ _id: 1 }).limit(limit).toArray();
+  const nextCursor = docs.length === limit ? docs[docs.length - 1]._id.toString() : null;
+
+  return {
+    count: docs.length,
+    next_cursor: nextCursor,
+    has_more: nextCursor !== null,
+    jobs: docs.map(docToJob),
+  };
+}
+
+export async function getPublicJobsCount({ keyword, location, jobType, site, skills }) {
+  const db = getDB();
+  const coll = db.collection('scraped_jobs');
+  const query = buildQuery({ orgId: null, keyword, location, jobType, site, skills });
+
+  const [total, siteAgg, jobTypeAgg] = await Promise.all([
+    coll.countDocuments(query),
+    coll.aggregate([{ $match: query }, { $group: { _id: '$source_site', count: { $sum: 1 } } }]).toArray(),
+    coll.aggregate([{ $match: query }, { $group: { _id: '$job_type', count: { $sum: 1 } } }]).toArray(),
+  ]);
+
+  return {
+    total,
+    by_site: Object.fromEntries(siteAgg.filter(r => r._id).map(r => [r._id, r.count])),
+    by_job_type: Object.fromEntries(jobTypeAgg.filter(r => r._id).map(r => [r._id, r.count])),
+  };
 }
 
 function docToJob(doc) {
@@ -52,7 +121,7 @@ function docToJob(doc) {
     company_url: doc.company_url || null,
     location: doc.location || {},
     salary: doc.salary || {},
-    job_type: doc.job_type || null,
+    job_type: normalizeJobType(doc.job_type),
     description: doc.description || null,
     posted_at: doc.posted_at || null,
     url: doc.url || null,
@@ -100,7 +169,7 @@ function jsearchRawToJob(raw, orgId) {
       interval: raw.job_salary_period || null,
       source: 'jsearch',
     },
-    job_type: raw.job_employment_type || null,
+    job_type: normalizeJobType(raw.job_employment_type),
     description: raw.job_description || null,
     posted_at: postedAt,
     url: raw.job_apply_link || raw.job_google_link || null,

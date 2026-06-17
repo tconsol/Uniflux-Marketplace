@@ -17,14 +17,14 @@ async function ensureIndexes() {
   const db = client.db(settings.MONGODB_DB_NAME);
   const coll = db.collection('scraped_jobs');
   await Promise.all([
+    coll.createIndex({ _id: 1 }),
+    coll.createIndex({ source_site: 1, _id: 1 }),
+    coll.createIndex({ job_type: 1, _id: 1 }),
+    coll.createIndex({ 'location.raw': 1, _id: 1 }),
+    coll.createIndex({ skills: 1, _id: 1 }),
+    coll.createIndex({ title: 1, _id: 1 }),
+    coll.createIndex({ org_id: 1, _id: 1 }),
     coll.createIndex({ scraped_at: -1 }),
-    coll.createIndex({ source_site: 1 }),
-    coll.createIndex({ org_id: 1 }),
-    coll.createIndex({ job_type: 1 }),
-    coll.createIndex({ 'location.raw': 1 }),
-    coll.createIndex({ skills: 1 }),
-    coll.createIndex({ org_id: 1, source_site: 1 }),
-    coll.createIndex({ org_id: 1, scraped_at: -1 }),
   ]);
   console.log('MongoDB indexes ensured');
 }

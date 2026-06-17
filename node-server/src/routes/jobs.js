@@ -1,8 +1,8 @@
 import { Router } from 'express';
 import { authenticate } from '../middleware/authMiddleware.js';
 import {
-  listScrapedJobs,
-  getPublicFilterCounts,
+  getPublicJobs,
+  getPublicJobsCount,
   getFetchStatus,
   getJobCounts,
   searchAndStoreJsearchJobs,
@@ -20,31 +20,22 @@ import {
 
 const router = Router();
 
-// Public — no auth
-router.get('/public/counts', async (req, res) => {
-  try {
-    const { keyword, location, job_type, site, skills, date_posted } = req.query;
-    const result = await getPublicFilterCounts({ keyword, location, jobType: job_type, site, skills, datePosted: date_posted });
-    res.json(result);
-  } catch (err) {
-    res.status(500).json({ detail: err.message });
-  }
-});
+// ─── PUBLIC (no auth) ────────────────────────────────────────────────────────
 
+// GET paginated jobs — 200 per page, cursor-based (no duplicates)
+// Filters: keyword, location, job_type, site, skills
+// Pagination: pass next_cursor from previous response as cursor param
 router.get('/public', async (req, res) => {
   try {
-    const { limit = 1000, skip = 0, keyword, location, job_type, site, skills, fetch_all, date_posted } = req.query;
-    const result = await listScrapedJobs({
-      orgId: null,
-      limit: Math.min(parseInt(limit) || 1000, 1000),
-      skip: parseInt(skip) || 0,
+    const { keyword, location, job_type, site, skills, cursor } = req.query;
+    const result = await getPublicJobs({
       keyword,
       location,
       jobType: job_type,
       site,
       skills,
-      fetchAll: fetch_all === 'true',
-      datePosted: date_posted,
+      cursor: cursor || null,
+      limit: 200,
     });
     res.json(result);
   } catch (err) {
@@ -52,26 +43,18 @@ router.get('/public', async (req, res) => {
   }
 });
 
-// Auth required below
-router.get('/', authenticate, async (req, res) => {
+// GET total count + breakdown by site and job_type
+router.get('/public/counts', async (req, res) => {
   try {
-    const { limit = 50, skip = 0, keyword, location, job_type, site, skills, fetch_all } = req.query;
-    const result = await listScrapedJobs({
-      orgId: req.currentUser.orgId,
-      limit: parseInt(limit),
-      skip: parseInt(skip),
-      keyword,
-      location,
-      jobType: job_type,
-      site,
-      skills,
-      fetchAll: fetch_all === 'true',
-    });
+    const { keyword, location, job_type, site, skills } = req.query;
+    const result = await getPublicJobsCount({ keyword, location, jobType: job_type, site, skills });
     res.json(result);
   } catch (err) {
     res.status(500).json({ detail: err.message });
   }
 });
+
+// ─── AUTH REQUIRED ────────────────────────────────────────────────────────────
 
 router.post('/jsearch', authenticate, async (req, res) => {
   try {
@@ -100,8 +83,7 @@ router.get('/jsearch/job-details', authenticate, async (req, res) => {
   try {
     const { job_id, country = 'us', language } = req.query;
     if (!job_id) return res.status(400).json({ detail: 'job_id required' });
-    const result = await jsearchJobDetails({ jobId: job_id, country, language });
-    res.json({ data: result });
+    res.json({ data: await jsearchJobDetails({ jobId: job_id, country, language }) });
   } catch (err) {
     res.status(502).json({ detail: `JSearch error: ${err.message}` });
   }
@@ -111,8 +93,7 @@ router.get('/jsearch/estimated-salary', authenticate, async (req, res) => {
   try {
     const { job_title, location, location_type = 'ANY', years_of_experience = 'ALL' } = req.query;
     if (!job_title || !location) return res.status(400).json({ detail: 'job_title and location required' });
-    const result = await jsearchEstimatedSalary({ jobTitle: job_title, location, locationType: location_type, yearsOfExperience: years_of_experience });
-    res.json({ data: result });
+    res.json({ data: await jsearchEstimatedSalary({ jobTitle: job_title, location, locationType: location_type, yearsOfExperience: years_of_experience }) });
   } catch (err) {
     res.status(502).json({ detail: `JSearch error: ${err.message}` });
   }
@@ -122,8 +103,7 @@ router.get('/jsearch/company-salary', authenticate, async (req, res) => {
   try {
     const { company, job_title, location, location_type = 'ANY', years_of_experience = 'ALL' } = req.query;
     if (!company || !job_title) return res.status(400).json({ detail: 'company and job_title required' });
-    const result = await jsearchCompanySalary({ company, jobTitle: job_title, location, locationType: location_type, yearsOfExperience: years_of_experience });
-    res.json({ data: result });
+    res.json({ data: await jsearchCompanySalary({ company, jobTitle: job_title, location, locationType: location_type, yearsOfExperience: years_of_experience }) });
   } catch (err) {
     res.status(502).json({ detail: `JSearch error: ${err.message}` });
   }
@@ -133,8 +113,7 @@ router.get('/fetch-status', authenticate, async (req, res) => {
   try {
     const sites = (req.query.sites || 'indeed,linkedin,glassdoor,zip_recruiter,google,jsearch')
       .split(',').map(s => s.trim()).filter(Boolean);
-    const result = await getFetchStatus(req.currentUser.orgId, sites);
-    res.json(result);
+    res.json(await getFetchStatus(req.currentUser.orgId, sites));
   } catch (err) {
     res.status(500).json({ detail: err.message });
   }
@@ -143,14 +122,7 @@ router.get('/fetch-status', authenticate, async (req, res) => {
 router.get('/counts', authenticate, async (req, res) => {
   try {
     const { keyword, location, is_remote, date_posted } = req.query;
-    const result = await getJobCounts({
-      orgId: req.currentUser.orgId,
-      keyword,
-      location,
-      isRemote: is_remote,
-      datePosted: date_posted,
-    });
-    res.json(result);
+    res.json(await getJobCounts({ orgId: req.currentUser.orgId, keyword, location, isRemote: is_remote, datePosted: date_posted }));
   } catch (err) {
     res.status(500).json({ detail: err.message });
   }
@@ -158,8 +130,7 @@ router.get('/counts', authenticate, async (req, res) => {
 
 router.get('/jsearch/scheduler/status', authenticate, async (req, res) => {
   try {
-    const result = await getJsearchSchedulerStatusForOrg(req.currentUser.orgId);
-    res.json(result);
+    res.json(await getJsearchSchedulerStatusForOrg(req.currentUser.orgId));
   } catch (err) {
     res.status(500).json({ detail: err.message });
   }
@@ -167,8 +138,7 @@ router.get('/jsearch/scheduler/status', authenticate, async (req, res) => {
 
 router.post('/jsearch/scheduler/start', authenticate, async (req, res) => {
   try {
-    const result = await startJsearchSchedulerForOrg(req.currentUser.orgId, req.body);
-    res.json(result);
+    res.json(await startJsearchSchedulerForOrg(req.currentUser.orgId, req.body));
   } catch (err) {
     res.status(502).json({ detail: `Scheduler start error: ${err.message}` });
   }
@@ -176,8 +146,7 @@ router.post('/jsearch/scheduler/start', authenticate, async (req, res) => {
 
 router.post('/jsearch/scheduler/stop', authenticate, async (req, res) => {
   try {
-    const result = await stopJsearchSchedulerForOrg(req.currentUser.orgId);
-    res.json(result);
+    res.json(await stopJsearchSchedulerForOrg(req.currentUser.orgId));
   } catch (err) {
     res.status(502).json({ detail: `Scheduler stop error: ${err.message}` });
   }
