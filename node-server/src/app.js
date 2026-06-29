@@ -10,12 +10,14 @@ import { restoreIndeedSchedulers } from './services/indeedSchedulerService.js';
 const app = express();
 app.set('trust proxy', true);
 
-const allowedOrigins = new Set(settings.ALLOWED_ORIGINS);
+const allowedOrigins = new Set((settings.ALLOWED_ORIGINS || []).map(v => String(v).trim()).filter(Boolean));
 
 app.use(cors({
   origin(origin, callback) {
     if (!origin) return callback(null, true);
     if (allowedOrigins.has(origin)) return callback(null, true);
+
+    console.error(`[CORS] Blocked origin: ${origin}. Allowed: ${JSON.stringify([...allowedOrigins])}`);
     return callback(new Error(`CORS blocked for origin: ${origin}`));
   },
   credentials: true,
@@ -42,6 +44,8 @@ app.use((req, res, next) => {
       status: res.statusCode,
       duration_ms: Date.now() - start,
       ip: req.ip,
+      origin: req.headers.origin || null,
+      user_agent: req.headers['user-agent'] || null,
     }));
   });
   next();
@@ -64,17 +68,30 @@ app.use('/api/v1/marketplace/jobs', jobsRouter);
 app.use('/api/v1/marketplace/indeed/scheduler', indeedSchedulerRouter);
 
 app.use((req, res) => {
-  res.status(404).json({ detail: `Route not found: ${req.method} ${req.originalUrl}` });
+  res.status(404).json({
+    detail: `Route not found: ${req.method} ${req.originalUrl}`,
+  });
 });
 
 app.use((err, req, res, next) => {
-  console.error('Unhandled error:', err);
+  console.error('[Unhandled error middleware]', {
+    message: err?.message,
+    stack: err?.stack,
+    path: req?.originalUrl,
+    method: req?.method,
+    origin: req?.headers?.origin || null,
+  });
 
-  if (err.message?.startsWith('CORS blocked')) {
+  if (err?.message?.startsWith('CORS blocked')) {
     return res.status(403).json({ detail: err.message });
   }
 
-  return res.status(500).json({ detail: 'Internal server error' });
+  return res.status(500).json({
+    detail:
+      settings.APP_ENV === 'production'
+        ? 'Internal server error'
+        : (err?.message || 'Internal server error'),
+  });
 });
 
 async function start() {
@@ -90,6 +107,7 @@ async function start() {
   const port = settings.APP_PORT;
   app.listen(port, '0.0.0.0', () => {
     console.log(`${settings.APP_NAME} running on 0.0.0.0:${port} env=${settings.APP_ENV}`);
+    console.log(`Allowed origins: ${JSON.stringify([...allowedOrigins])}`);
   });
 }
 
