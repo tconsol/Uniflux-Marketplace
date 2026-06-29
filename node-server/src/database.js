@@ -5,17 +5,25 @@ let client = null;
 
 export async function connectDB() {
   if (!client) {
-    client = new MongoClient(settings.MONGODB_URI);
+    client = new MongoClient(settings.MONGODB_URI, {
+      maxPoolSize: 10,
+      minPoolSize: 1,
+      serverSelectionTimeoutMS: 15000,
+      socketTimeoutMS: 45000,
+    });
+
     await client.connect();
     console.log('MongoDB connected');
     await ensureIndexes();
   }
+
   return client;
 }
 
 async function ensureIndexes() {
   const db = client.db(settings.MONGODB_DB_NAME);
   const coll = db.collection('scraped_jobs');
+
   await Promise.all([
     coll.createIndex({ _id: 1 }),
     coll.createIndex({ source_site: 1, _id: 1 }),
@@ -26,11 +34,15 @@ async function ensureIndexes() {
     coll.createIndex({ org_id: 1, _id: 1 }),
     coll.createIndex({ scraped_at: -1 }),
   ]);
+
   console.log('MongoDB indexes ensured');
 }
 
 export function getDB() {
-  if (!client) throw new Error('DB not connected. Call connectDB() first.');
+  if (!client) {
+    throw new Error('DB not connected. Call connectDB() first.');
+  }
+
   return client.db(settings.MONGODB_DB_NAME);
 }
 

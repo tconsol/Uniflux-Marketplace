@@ -1,10 +1,20 @@
 import cron from 'node-cron';
 import { getDB } from '../database.js';
 import { searchAndStoreJsearchJobs } from './jobsService.js';
+import { settings } from '../config/settings.js';
 
 const schedulerJobs = new Map();
 
+function cronEnabled() {
+  return settings.APP_ENV !== 'production';
+}
+
 export async function restoreJsearchSchedulers() {
+  if (!cronEnabled()) {
+    console.log('[JSearch Scheduler] skipped restore in production (Cloud Run stateless mode)');
+    return;
+  }
+
   const db = getDB();
   const active = await db.collection('jsearch_scheduler_meta')
     .find({ enabled: true })
@@ -20,6 +30,7 @@ export async function restoreJsearchSchedulers() {
     schedulerJobs.set(jobId, task);
     console.log(`[JSearch Scheduler] restored org_id=${orgId} interval=${config.interval_minutes}min`);
   }
+
   console.log(`[JSearch Scheduler] restored ${active.length} scheduler(s)`);
 }
 
@@ -47,10 +58,12 @@ async function runJsearchTick(orgId) {
   if (!state?.enabled || !state?.config) return;
 
   const config = state.config;
-  let totalFetched = 0, totalNew = 0, totalStored = 0;
+  let totalFetched = 0;
+  let totalNew = 0;
+  let totalStored = 0;
   const errors = [];
 
-  for (const keyword of config.keywords) {
+  for (const keyword of config.keywords || []) {
     try {
       const result = await searchAndStoreJsearchJobs({
         keywords: keyword,
@@ -79,7 +92,7 @@ async function runJsearchTick(orgId) {
     total_fetched: totalFetched,
     total_stored: totalStored,
     total_new: totalNew,
-    keywords_run: config.keywords.length,
+    keywords_run: (config.keywords || []).length,
     errors,
   });
 }
@@ -92,6 +105,22 @@ function intervalToCron(minutes) {
 
 export async function startJsearchSchedulerForOrg(orgId, config) {
   const jobId = `jsearch_auto_pull:${orgId}`;
+
+  if (!cronEnabled()) {
+    await saveSchedulerState(orgId, true, config);
+    return {
+      enabled: true,
+      running: false,
+      mode: 'persistent-state-only',
+      job_id: jobId,
+      interval_minutes: config.interval_minutes,
+      next_run_at: null,
+      last_run_at: null,
+      last_result: null,
+      config,
+      message: 'Scheduler state saved, but in-memory cron is disabled in production on Cloud Run.',
+    };
+  }
 
   if (schedulerJobs.has(jobId)) {
     schedulerJobs.get(jobId).stop();
@@ -107,6 +136,7 @@ export async function startJsearchSchedulerForOrg(orgId, config) {
   return {
     enabled: true,
     running: true,
+    mode: 'in-memory-cron',
     job_id: jobId,
     interval_minutes: config.interval_minutes,
     next_run_at: null,
@@ -130,6 +160,7 @@ export async function stopJsearchSchedulerForOrg(orgId) {
   return {
     enabled: false,
     running: false,
+    mode: cronEnabled() ? 'in-memory-cron' : 'persistent-state-only',
     job_id: jobId,
     interval_minutes: state?.config?.interval_minutes || 60,
     next_run_at: null,
@@ -145,7 +176,8 @@ export async function getJsearchSchedulerStatusForOrg(orgId) {
 
   return {
     enabled: Boolean(state?.enabled),
-    running: schedulerJobs.has(jobId),
+    running: cronEnabled() ? schedulerJobs.has(jobId) : false,
+    mode: cronEnabled() ? 'in-memory-cron' : 'persistent-state-only',
     job_id: jobId,
     interval_minutes: state?.config?.interval_minutes || 60,
     next_run_at: null,
