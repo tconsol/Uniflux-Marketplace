@@ -648,7 +648,7 @@ async def get_job_counts(
         "parttime",
         "internship",
     ]
-    all_sites = ["google", "glassdoor", "zip_recruiter", "indeed", "jsearch"]
+    all_sites = ["google", "glassdoor", "zip_recruiter", "indeed", "jsearch", "linkedin"]
 
     async def count(extra: Dict[str, Any] = {}) -> int:
         return await jobs_coll.count_documents({**base_query, **extra})
