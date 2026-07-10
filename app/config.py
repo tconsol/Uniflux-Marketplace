@@ -11,8 +11,10 @@ class Settings(BaseSettings):
     MONGODB_URI: str
     MONGODB_DB_NAME: str = "market-place"
 
-    # JWT — must match Spring Boot gateway secret
-    JWT_SECRET: str = "uniflux-super-secret-key-must-be-32-chars-min"
+    # JWT - must match the gateway/shared secret. Required, no default: a missing
+    # env var must fail startup rather than silently signing/verifying tokens with a
+    # guessable value that's public in source history.
+    JWT_SECRET: str
     JWT_ALGORITHM: str = "HS256"
 
     # JobSpy
@@ -26,7 +28,7 @@ class Settings(BaseSettings):
 
     # Eureka — same pattern as job aggregator
     EUREKA_SERVER: str = "http://localhost:8761/eureka"
-    SERVICE_NAME: str = "MARKETPLACE-SERVICE"
+    SERVICE_NAME: str = "marketplace"
     SERVICE_HOST: str = "localhost"
     SERVICE_PORT: int = 8085
 

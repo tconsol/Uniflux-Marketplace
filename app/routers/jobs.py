@@ -34,6 +34,11 @@ from app.services.jsearch_scheduler_service import (
     stop_jsearch_scheduler_for_org,
     get_jsearch_scheduler_status_for_org,
 )
+from app.services.jsearch_service import (
+    jsearch_job_details,
+    jsearch_estimated_salary,
+    jsearch_company_salary,
+)
 
 
 router = APIRouter(prefix="/api/v1/marketplace/jobs", tags=["Marketplace Jobs"])
@@ -98,6 +103,63 @@ async def search_jobs_jsearch(
         return await search_and_store_jsearch_jobs(payload, org_id=current_user.org_id)
     except RuntimeError as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"JSearch error: {exc}") from exc
+
+
+@router.get("/jsearch/job-details")
+async def get_jsearch_job_details(
+    job_id: str = Query(...),
+    country: str = Query("us"),
+    language: Optional[str] = Query(None),
+    current_user: CurrentUser = Depends(get_current_user),
+):
+    try:
+        return {"data": await jsearch_job_details(job_id=job_id, country=country, language=language)}
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"JSearch error: {exc}") from exc
+
+
+@router.get("/jsearch/estimated-salary")
+async def get_jsearch_estimated_salary(
+    job_title: str = Query(...),
+    location: str = Query(...),
+    location_type: str = Query("ANY"),
+    years_of_experience: str = Query("ALL"),
+    current_user: CurrentUser = Depends(get_current_user),
+):
+    try:
+        return {
+            "data": await jsearch_estimated_salary(
+                job_title=job_title,
+                location=location,
+                location_type=location_type,
+                years_of_experience=years_of_experience,
+            )
+        }
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"JSearch error: {exc}") from exc
+
+
+@router.get("/jsearch/company-salary")
+async def get_jsearch_company_salary(
+    company: str = Query(...),
+    job_title: str = Query(...),
+    location: Optional[str] = Query(None),
+    location_type: str = Query("ANY"),
+    years_of_experience: str = Query("ALL"),
+    current_user: CurrentUser = Depends(get_current_user),
+):
+    try:
+        return {
+            "data": await jsearch_company_salary(
+                company=company,
+                job_title=job_title,
+                location=location,
+                location_type=location_type,
+                years_of_experience=years_of_experience,
+            )
+        }
     except Exception as exc:
         raise HTTPException(status_code=502, detail=f"JSearch error: {exc}") from exc
 
