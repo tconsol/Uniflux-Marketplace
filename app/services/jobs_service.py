@@ -251,16 +251,14 @@ def _jsearch_job_to_scraped(raw: Dict[str, Any], org_id: str) -> ScrapedJob:
     )
 
 
-def _job_identity_query(job: ScrapedJob, org_id: str) -> Dict[str, Any]:
+def _job_identity_query(job: ScrapedJob) -> Dict[str, Any]:
     if job.external_id:
         return {
-            "org_id": org_id,
             "source_site": job.source_site,
             "external_id": job.external_id,
         }
 
     return {
-        "org_id": org_id,
         "source_site": job.source_site,
         "title": job.title,
         "company_name": job.company_name,
@@ -271,10 +269,9 @@ def _job_identity_query(job: ScrapedJob, org_id: str) -> Dict[str, Any]:
 async def _upsert_job(
     jobs_coll,
     job: ScrapedJob,
-    org_id: str,
     now: datetime,
 ) -> Tuple[ScrapedJob, bool]:
-    query = _job_identity_query(job, org_id)
+    query = _job_identity_query(job)
     existing = await jobs_coll.find_one(query)
 
     doc = job.model_dump(exclude={"id"})
@@ -375,7 +372,7 @@ async def search_and_store_jobs(payload: JobSearchRequest, org_id: str) -> Scrap
         if not df.empty:
             for _, row in df.iterrows():
                 job = _row_to_scraped_job(row, org_id=org_id)
-                job, _ = await _upsert_job(jobs_coll, job, org_id, now)
+                job, _ = await _upsert_job(jobs_coll, job, now)
                 all_jobs.append(job)
 
         await _update_fetch_meta(
@@ -440,7 +437,7 @@ async def search_and_store_jsearch_jobs(payload: JSearchRequest, org_id: str) ->
 
     for raw in raw_jobs:
         job = _jsearch_job_to_scraped(raw, org_id=org_id)
-        job, inserted = await _upsert_job(jobs_coll, job, org_id, now)
+        job, inserted = await _upsert_job(jobs_coll, job, now)
         if inserted:
             new_count += 1
         stored_jobs.append(job)
