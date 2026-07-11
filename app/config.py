@@ -15,7 +15,10 @@ class Settings(BaseSettings):
     # env var must fail startup rather than silently signing/verifying tokens with a
     # guessable value that's public in source history.
     JWT_SECRET: str
-    JWT_ALGORITHM: str = "HS256"
+    # Comma-separated list of accepted HMAC algorithms. The token issuer signs with
+    # HS512; HS256 is kept for backward compatibility. See auth_middleware for why both
+    # are always accepted regardless of this value.
+    JWT_ALGORITHM: str = "HS256,HS512"
 
     # JobSpy
     JOBSPY_MAX_RESULTS: int = 100

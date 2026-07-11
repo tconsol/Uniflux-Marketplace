@@ -5,6 +5,17 @@ from app.config import settings
 
 bearer_scheme = HTTPBearer(auto_error=True)
 
+# Tokens are issued elsewhere (shell/auth service) and have been observed signed with
+# HS512, while this service historically only allowed HS256 — an HS512 token then fails
+# decode with "alg not allowed" and every request 401s. All variants are HMAC over the
+# same shared secret, so accepting the wider set costs nothing security-wise (a forger
+# still needs the secret) and makes the service tolerant of the issuer's algorithm.
+# Union with the configured value so an env that pins JWT_ALGORITHM can't re-break this.
+_ALLOWED_ALGORITHMS = sorted(
+    {a.strip() for a in settings.JWT_ALGORITHM.split(",") if a.strip()}
+    | {"HS256", "HS512"}
+)
+
 
 class CurrentUser:
     def __init__(
@@ -39,7 +50,7 @@ def _decode_token(token: str) -> dict:
         payload = jwt.decode(
             token,
             settings.JWT_SECRET,
-            algorithms=[settings.JWT_ALGORITHM],
+            algorithms=_ALLOWED_ALGORITHMS,
         )
         return payload
     except JWTError as e:
