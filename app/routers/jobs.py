@@ -2,6 +2,7 @@ from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 
+from app.constants import GLOBAL_ORG_ID
 from app.middleware.auth_middleware import get_current_user, CurrentUser
 from app.models.scraped_job import (
     JobSearchRequest,
@@ -170,7 +171,7 @@ async def fetch_status(
     current_user: CurrentUser = Depends(get_current_user),
 ):
     site_list = [s.strip() for s in sites.split(",") if s.strip()]
-    return await get_fetch_status(org_id=current_user.org_id, sites=site_list)
+    return await get_fetch_status(org_id=GLOBAL_ORG_ID, sites=site_list)
 
 
 @router.get("/counts")
