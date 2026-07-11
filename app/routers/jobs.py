@@ -182,7 +182,6 @@ async def job_counts(
     current_user: CurrentUser = Depends(get_current_user),
 ):
     return await get_job_counts(
-        org_id=current_user.org_id,
         keyword=keyword,
         location=location,
         is_remote=is_remote,
@@ -203,7 +202,7 @@ async def get_scraped_jobs(
     current_user: CurrentUser = Depends(get_current_user),
 ):
     return await list_scraped_jobs(
-        org_id=current_user.org_id,
+        org_id=None,
         limit=limit,
         skip=skip,
         keyword=keyword,

@@ -617,7 +617,6 @@ async def get_public_filter_counts(
 
 
 async def get_job_counts(
-    org_id: str,
     keyword: Optional[str] = None,
     location: Optional[str] = None,
     is_remote: Optional[str] = None,
@@ -626,7 +625,7 @@ async def get_job_counts(
     db = get_db()
     jobs_coll = db.scraped_jobs
 
-    base_query: Dict[str, Any] = {"org_id": org_id}
+    base_query: Dict[str, Any] = {}
 
     if keyword:
         base_query["$or"] = [
