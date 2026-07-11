@@ -15,10 +15,12 @@ from app.services.indeed_scheduler_service import (
     init_indeed_scheduler,
     shutdown_indeed_scheduler,
 )
+from app.services.jobs_service import migrate_jobs_to_global
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    await migrate_jobs_to_global()
     await init_jsearch_scheduler()
     await init_indeed_scheduler()
     await register_with_eureka()

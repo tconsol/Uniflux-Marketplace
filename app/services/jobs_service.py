@@ -27,6 +27,21 @@ logger = logging.getLogger(__name__)
 FETCH_COOLDOWN_MINUTES = 15
 
 
+async def migrate_jobs_to_global() -> int:
+    """Fold any pre-existing org-scoped jobs into the single global pool.
+
+    Idempotent: the $ne filter makes this a cheap no-op after the first run.
+    """
+    db = get_db()
+    result = await db.scraped_jobs.update_many(
+        {"org_id": {"$ne": GLOBAL_ORG_ID}},
+        {"$set": {"org_id": GLOBAL_ORG_ID}},
+    )
+    if result.modified_count:
+        logger.info("Migrated %d jobs to GLOBAL pool", result.modified_count)
+    return result.modified_count
+
+
 def _flexible_regex(value: str) -> str:
     """Build regex matching value regardless of case, spaces, hyphens, or underscores.
     e.g. 'full time' matches 'Full Time', 'Full-Time', 'FULL_TIME', 'fulltime'
