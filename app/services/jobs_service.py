@@ -7,6 +7,7 @@ from typing import List, Optional, Dict, Any, Tuple
 
 import pandas as pd
 
+from app.constants import GLOBAL_ORG_ID
 from app.database import get_db
 from app.models.scraped_job import (
     JobSearchRequest,
@@ -335,7 +336,8 @@ async def get_fetch_status(org_id: str, sites: List[str]) -> List[FetchStatusRes
     return result
 
 
-async def search_and_store_jobs(payload: JobSearchRequest, org_id: str) -> ScrapedJobListResponse:
+async def search_and_store_jobs(payload: JobSearchRequest, org_id: str = GLOBAL_ORG_ID) -> ScrapedJobListResponse:
+    org_id = GLOBAL_ORG_ID
     db = get_db()
     jobs_coll = db.scraped_jobs
     all_jobs: List[ScrapedJob] = []
@@ -385,7 +387,8 @@ async def search_and_store_jobs(payload: JobSearchRequest, org_id: str) -> Scrap
     return ScrapedJobListResponse(total=len(all_jobs), jobs=all_jobs)
 
 
-async def search_and_store_jsearch_jobs(payload: JSearchRequest, org_id: str) -> JSearchFetchResponse:
+async def search_and_store_jsearch_jobs(payload: JSearchRequest, org_id: str = GLOBAL_ORG_ID) -> JSearchFetchResponse:
+    org_id = GLOBAL_ORG_ID
     db = get_db()
     jobs_coll = db.scraped_jobs
     now = datetime.utcnow()

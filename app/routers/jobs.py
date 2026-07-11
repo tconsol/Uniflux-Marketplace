@@ -89,7 +89,7 @@ async def search_jobs(
     current_user: CurrentUser = Depends(get_current_user),
 ):
     try:
-        return await search_and_store_jobs(payload, org_id=current_user.org_id)
+        return await search_and_store_jobs(payload)
     except Exception as exc:
         raise HTTPException(status_code=502, detail=f"Scraping error: {exc}") from exc
 
@@ -100,7 +100,7 @@ async def search_jobs_jsearch(
     current_user: CurrentUser = Depends(get_current_user),
 ):
     try:
-        return await search_and_store_jsearch_jobs(payload, org_id=current_user.org_id)
+        return await search_and_store_jsearch_jobs(payload)
     except RuntimeError as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
     except Exception as exc:
