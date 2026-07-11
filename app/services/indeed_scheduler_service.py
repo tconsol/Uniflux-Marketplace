@@ -5,6 +5,7 @@ from typing import Any, Dict, Optional
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.interval import IntervalTrigger
 
+from app.constants import GLOBAL_ORG_ID
 from app.database import get_db
 from app.models.scraped_job import (
     JobSearchRequest,
@@ -19,11 +20,49 @@ INDEED_SCHEDULER_JOB_ID = "indeed_auto_pull"
 
 scheduler = AsyncIOScheduler(timezone="UTC")
 
+GLOBAL_INDEED_CONFIG = IndeedSchedulerConfig(
+    location="United States",
+    interval_minutes=30,
+)
+GLOBAL_JOB_ID = f"{INDEED_SCHEDULER_JOB_ID}:{GLOBAL_ORG_ID}"
+
 
 async def init_indeed_scheduler() -> None:
     if not scheduler.running:
         scheduler.start()
         logger.info("Indeed scheduler started")
+    await _register_global_indeed_job()
+
+
+async def _register_global_indeed_job() -> None:
+    state = await _get_scheduler_state(GLOBAL_ORG_ID)
+
+    config = GLOBAL_INDEED_CONFIG
+    current_index = 0
+    if state:
+        current_index = int(state.get("current_keyword_index", 0))
+        if state.get("config"):
+            try:
+                config = IndeedSchedulerConfig(**state["config"])
+            except Exception:
+                config = GLOBAL_INDEED_CONFIG
+
+    scheduler.add_job(
+        _run_indeed_tick,
+        trigger=IntervalTrigger(minutes=config.interval_minutes),
+        id=GLOBAL_JOB_ID,
+        kwargs={"org_id": GLOBAL_ORG_ID},
+        replace_existing=True,
+        max_instances=1,
+        coalesce=True,
+    )
+    await _save_scheduler_state(
+        org_id=GLOBAL_ORG_ID,
+        enabled=True,
+        config=config.model_dump(),
+        current_keyword_index=current_index,
+    )
+    logger.info("Global indeed scheduler registered (interval=%dm)", config.interval_minutes)
 
 
 async def shutdown_indeed_scheduler() -> None:
