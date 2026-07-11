@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException
 
 from app.constants import GLOBAL_ORG_ID
-from app.middleware.auth_middleware import get_current_user, CurrentUser
+from app.middleware.auth_middleware import get_current_user, require_super_admin, CurrentUser
 from app.models.scraped_job import (
     IndeedSchedulerConfig,
     IndeedSchedulerStatusResponse,
@@ -25,7 +25,7 @@ async def indeed_scheduler_status(
 @router.post("/start", response_model=IndeedSchedulerStatusResponse)
 async def indeed_scheduler_start(
     payload: IndeedSchedulerConfig,
-    current_user: CurrentUser = Depends(get_current_user),
+    current_user: CurrentUser = Depends(require_super_admin),
 ):
     try:
         return await start_indeed_scheduler_for_org(
@@ -38,7 +38,7 @@ async def indeed_scheduler_start(
 
 @router.post("/stop", response_model=IndeedSchedulerStatusResponse)
 async def indeed_scheduler_stop(
-    current_user: CurrentUser = Depends(get_current_user),
+    current_user: CurrentUser = Depends(require_super_admin),
 ):
     try:
         return await stop_indeed_scheduler_for_org(org_id=GLOBAL_ORG_ID)
