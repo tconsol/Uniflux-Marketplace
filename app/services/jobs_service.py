@@ -44,11 +44,16 @@ async def migrate_jobs_to_global() -> int:
 
 def _flexible_regex(value: str) -> str:
     """Build regex matching value regardless of case, spaces, hyphens, or underscores.
-    e.g. 'full time' matches 'Full Time', 'Full-Time', 'FULL_TIME', 'fulltime'
+    e.g. 'full time' matches 'Full Time', 'Full-Time', 'FULL_TIME', 'fulltime' -
+    and 'fulltime' (already separator-free, e.g. the frontend's normalized job-type
+    tokens) also matches 'Full-Time'. Stripping the input's own separators first and
+    inserting an optional separator between every remaining character makes the match
+    symmetric regardless of which side (input or stored value) has the punctuation.
     """
-    normalized = value.strip().lower()
-    words = [w for w in re.split(r'[\s\-_]+', normalized) if w]
-    pattern = r'[\s\-_]*'.join(re.escape(w) for w in words)
+    compact = re.sub(r'[\s\-_]+', '', value.strip().lower())
+    if not compact:
+        return re.escape(value.strip().lower())
+    pattern = r'[\s\-_]*'.join(re.escape(ch) for ch in compact)
     return pattern
 
 
@@ -497,6 +502,8 @@ async def list_scraped_jobs(
     site: Optional[str] = None,
     skills: Optional[str] = None,
     fetch_all: bool = False,
+    is_remote: Optional[str] = None,
+    date_posted: Optional[str] = None,
 ) -> ScrapedJobListResponse:
     db = get_db()
     jobs_coll = db.scraped_jobs
@@ -521,6 +528,23 @@ async def list_scraped_jobs(
 
     if site:
         query["source_site"] = site.strip().lower()
+
+    if is_remote is not None and is_remote.strip() != "":
+        query["location.is_remote"] = is_remote.strip().lower() == "true"
+
+    if date_posted:
+        try:
+            days = int(date_posted)
+            cutoff = datetime.utcnow() - timedelta(days=days)
+            # Mirror the frontend's matchesDatePosted(): a job with no posted_at is left
+            # in rather than excluded, since we can't tell how old it actually is.
+            and_conditions.append({"$or": [
+                {"posted_at": {"$gte": cutoff}},
+                {"posted_at": None},
+                {"posted_at": {"$exists": False}},
+            ]})
+        except ValueError:
+            pass
 
     if skills:
         skill_list = [s.strip() for s in skills.split(",") if s.strip()]
