@@ -57,6 +57,28 @@ def _flexible_regex(value: str) -> str:
     return pattern
 
 
+# Engagement models that are contract / full-time work under another name. The sidebar no
+# longer offers them as filters of their own, so they fold into the canonical type. Mirrors
+# JOB_TYPE_ALIASES in the marketplace UI (src/lib/utils.ts): the counts, the server-side list
+# filter and the client-side filter must fold these identically, or the number beside a filter
+# disagrees with the rows that filter actually shows.
+_JOB_TYPE_ALIASES: Dict[str, List[str]] = {
+    "contract": ["contract", "c2c", "c2h", "contract to hire"],
+    "fulltime": ["fulltime", "w2"],
+}
+
+
+def _job_type_regex(value: str) -> str:
+    """Build a regex matching a job type and every engagement model aliased to it.
+
+    Falls back to plain flexible matching for types with no aliases (parttime, internship,
+    or any raw value a caller passes through).
+    """
+    compact = re.sub(r'[\s\-_]+', '', value.strip().lower())
+    variants = _JOB_TYPE_ALIASES.get(compact, [value])
+    return "|".join("(?:%s)" % _flexible_regex(v) for v in variants)
+
+
 def _normalize_dates(data: dict) -> dict:
     for k, v in list(data.items()):
         if isinstance(v, date) and not isinstance(v, datetime):
@@ -524,7 +546,7 @@ async def list_scraped_jobs(
         query["location.raw"] = {"$regex": _flexible_regex(location), "$options": "i"}
 
     if job_type:
-        query["job_type"] = {"$regex": _flexible_regex(job_type), "$options": "i"}
+        query["job_type"] = {"$regex": _job_type_regex(job_type), "$options": "i"}
 
     if site:
         query["source_site"] = site.strip().lower()
@@ -615,7 +637,7 @@ async def get_public_filter_counts(
     if location:
         query["location.raw"] = {"$regex": _flexible_regex(location), "$options": "i"}
     if job_type:
-        query["job_type"] = {"$regex": _flexible_regex(job_type), "$options": "i"}
+        query["job_type"] = {"$regex": _job_type_regex(job_type), "$options": "i"}
     if site:
         query["source_site"] = site.strip().lower()
     if skills:
@@ -679,10 +701,6 @@ async def get_job_counts(
     job_types = [
         "fulltime",
         "contract",
-        "c2c",
-        "w2",
-        "c2h",
-        "contract_to_hire",
         "parttime",
         "internship",
     ]
@@ -698,7 +716,7 @@ async def get_job_counts(
 
     site_job_type_counts = await asyncio.gather(
         *[
-            count({"source_site": site, "job_type": {"$regex": jt, "$options": "i"}})
+            count({"source_site": site, "job_type": {"$regex": _job_type_regex(jt), "$options": "i"}})
             for site in all_sites
             for jt in job_types
         ]
