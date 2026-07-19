@@ -79,6 +79,23 @@ def _job_type_regex(value: str) -> str:
     return "|".join("(?:%s)" % _flexible_regex(v) for v in variants)
 
 
+def _job_type_filter(value: str) -> Dict[str, Any]:
+    """Mongo condition for a job_type filter. Jobs with no employment type fall back to full-time
+    (mirrors normalizeJobType in the marketplace UI), so a full-time filter also catches rows whose
+    job_type is null / missing / empty. Other types match their regex as usual.
+    """
+    match = {"job_type": {"$regex": _job_type_regex(value), "$options": "i"}}
+    compact = re.sub(r'[\s\-_]+', '', value.strip().lower())
+    if compact == "fulltime":
+        return {"$or": [
+            match,
+            {"job_type": None},
+            {"job_type": ""},
+            {"job_type": {"$exists": False}},
+        ]}
+    return match
+
+
 def _normalize_dates(data: dict) -> dict:
     for k, v in list(data.items()):
         if isinstance(v, date) and not isinstance(v, datetime):
@@ -526,6 +543,7 @@ async def list_scraped_jobs(
     fetch_all: bool = False,
     is_remote: Optional[str] = None,
     date_posted: Optional[str] = None,
+    sort_by: str = "scraped_at",
 ) -> ScrapedJobListResponse:
     db = get_db()
     jobs_coll = db.scraped_jobs
@@ -546,7 +564,7 @@ async def list_scraped_jobs(
         query["location.raw"] = {"$regex": _flexible_regex(location), "$options": "i"}
 
     if job_type:
-        query["job_type"] = {"$regex": _job_type_regex(job_type), "$options": "i"}
+        and_conditions.append(_job_type_filter(job_type))
 
     if site:
         query["source_site"] = site.strip().lower()
@@ -581,11 +599,20 @@ async def list_scraped_jobs(
 
     total = await jobs_coll.count_documents(query)
 
+    # Sort newest-first by the requested field. posted_at is the source board's listing date;
+    # scraped_at is our pull time (the default, keeps genuinely-fresh jobs on top). For posted_at
+    # we tiebreak on scraped_at so jobs with a null/missing posted_at (which Mongo sorts last on a
+    # descending key) still fall back to freshness ordering among themselves.
+    if sort_by == "posted_at":
+        sort_spec = [("posted_at", -1), ("scraped_at", -1)]
+    else:
+        sort_spec = [("scraped_at", -1)]
+
     if fetch_all:
-        cursor = jobs_coll.find(query).sort("scraped_at", -1)
+        cursor = jobs_coll.find(query).sort(sort_spec)
         docs = await cursor.to_list(length=None)
     else:
-        cursor = jobs_coll.find(query).sort("scraped_at", -1).skip(skip).limit(limit)
+        cursor = jobs_coll.find(query).sort(sort_spec).skip(skip).limit(limit)
         docs = await cursor.to_list(length=limit)
 
     jobs: List[ScrapedJob] = []
@@ -637,7 +664,7 @@ async def get_public_filter_counts(
     if location:
         query["location.raw"] = {"$regex": _flexible_regex(location), "$options": "i"}
     if job_type:
-        query["job_type"] = {"$regex": _job_type_regex(job_type), "$options": "i"}
+        and_conditions.append(_job_type_filter(job_type))
     if site:
         query["source_site"] = site.strip().lower()
     if skills:
@@ -716,7 +743,7 @@ async def get_job_counts(
 
     site_job_type_counts = await asyncio.gather(
         *[
-            count({"source_site": site, "job_type": {"$regex": _job_type_regex(jt), "$options": "i"}})
+            count({"source_site": site, "$and": [_job_type_filter(jt)]})
             for site in all_sites
             for jt in job_types
         ]

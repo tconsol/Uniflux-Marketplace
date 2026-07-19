@@ -202,6 +202,7 @@ async def get_scraped_jobs(
     fetch_all: bool = Query(False),
     is_remote: Optional[str] = Query(None),
     date_posted: Optional[str] = Query(None),
+    sort_by: str = Query("scraped_at"),
     current_user: CurrentUser = Depends(get_current_user),
 ):
     return await list_scraped_jobs(
@@ -216,6 +217,7 @@ async def get_scraped_jobs(
         fetch_all=fetch_all,
         is_remote=is_remote,
         date_posted=date_posted,
+        sort_by=sort_by,
     )
 
 @router.get("/jsearch/scheduler/status", response_model=JSearchSchedulerStatusResponse)
