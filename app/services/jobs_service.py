@@ -544,6 +544,7 @@ async def list_scraped_jobs(
     is_remote: Optional[str] = None,
     date_posted: Optional[str] = None,
     sort_by: str = "scraped_at",
+    country: Optional[str] = None,
 ) -> ScrapedJobListResponse:
     db = get_db()
     jobs_coll = db.scraped_jobs
@@ -568,6 +569,11 @@ async def list_scraped_jobs(
 
     if site:
         query["source_site"] = site.strip().lower()
+
+    if country and country.strip():
+        # Region filter (e.g. 'us' / 'in'). location.country is a 2-char code;
+        # match case-insensitively since stored casing varies by source.
+        query["location.country"] = {"$regex": f"^{re.escape(country.strip())}$", "$options": "i"}
 
     if is_remote is not None and is_remote.strip() != "":
         query["location.is_remote"] = is_remote.strip().lower() == "true"
@@ -647,6 +653,7 @@ async def get_public_filter_counts(
     job_type: Optional[str] = None,
     site: Optional[str] = None,
     skills: Optional[str] = None,
+    country: Optional[str] = None,
 ):
     from app.models.scraped_job import PublicJobCountsResponse
 
@@ -667,6 +674,8 @@ async def get_public_filter_counts(
         and_conditions.append(_job_type_filter(job_type))
     if site:
         query["source_site"] = site.strip().lower()
+    if country and country.strip():
+        query["location.country"] = {"$regex": f"^{re.escape(country.strip())}$", "$options": "i"}
     if skills:
         skill_list = [s.strip() for s in skills.split(",") if s.strip()]
         if skill_list:

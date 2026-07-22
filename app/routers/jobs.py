@@ -53,6 +53,7 @@ async def get_public_scraped_jobs(
     job_type: Optional[str] = Query(None),
     site: Optional[str] = Query(None),
     skills: Optional[str] = Query(None),
+    country: Optional[str] = Query(None),
     fetch_all: bool = Query(False),
 ):
     return await list_scraped_jobs(
@@ -64,6 +65,7 @@ async def get_public_scraped_jobs(
         job_type=job_type,
         site=site,
         skills=skills,
+        country=country,
         fetch_all=fetch_all,
     )
 
@@ -74,6 +76,7 @@ async def get_public_job_counts(
     job_type: Optional[str] = Query(None),
     site: Optional[str] = Query(None),
     skills: Optional[str] = Query(None),
+    country: Optional[str] = Query(None),
 ):
     return await get_public_filter_counts(
         keyword=keyword,
@@ -81,6 +84,7 @@ async def get_public_job_counts(
         job_type=job_type,
         site=site,
         skills=skills,
+        country=country,
     )
 
 
