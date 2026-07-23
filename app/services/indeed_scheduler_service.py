@@ -18,6 +18,9 @@ logger = logging.getLogger(__name__)
 
 INDEED_SCHEDULER_JOB_ID = "indeed_auto_pull"
 
+# Every keyword is fetched in each of these regions per tick. (location, country_indeed name).
+INDEED_REGIONS = [("India", "India"), ("United States", "USA")]
+
 scheduler = AsyncIOScheduler(timezone="UTC")
 
 GLOBAL_INDEED_CONFIG = IndeedSchedulerConfig(
@@ -136,32 +139,35 @@ async def _run_indeed_tick(org_id: str) -> None:
     keyword = keywords[current_index]
     next_index = (current_index + 1) % len(keywords)
 
-    payload = JobSearchRequest(
-        keywords=keyword,
-        location=config.location,
-        sites=["indeed"],
-        results_wanted=config.results_wanted,
-        hours_old=config.hours_old,
-        country_indeed=config.country_indeed,
-        remote_only=config.remote_only,
-    )
-
-    logger.info(
-        "Indeed scheduler tick keyword=%s org_id=%s location=%s index=%d next_index=%d",
-        keyword, org_id, config.location, current_index, next_index,
-    )
-
     total_fetched = 0
     errors = []
 
-    try:
-        result = await search_and_store_jobs(payload, org_id=org_id)
-        total_fetched = result.total
-    except Exception as exc:
-        logger.exception(
-            "Indeed scheduler tick failed keyword=%s org_id=%s", keyword, org_id
+    # Fetch every keyword in both India and the USA each tick, regardless of the single
+    # location/country stored in the config.
+    for location, country_indeed in INDEED_REGIONS:
+        payload = JobSearchRequest(
+            keywords=keyword,
+            location=location,
+            sites=["indeed"],
+            results_wanted=config.results_wanted,
+            hours_old=config.hours_old,
+            country_indeed=country_indeed,
+            remote_only=config.remote_only,
         )
-        errors.append({"keyword": keyword, "error": str(exc)})
+
+        logger.info(
+            "Indeed scheduler tick keyword=%s org_id=%s location=%s country=%s index=%d next_index=%d",
+            keyword, org_id, location, country_indeed, current_index, next_index,
+        )
+
+        try:
+            result = await search_and_store_jobs(payload, org_id=org_id)
+            total_fetched += result.total
+        except Exception as exc:
+            logger.exception(
+                "Indeed scheduler tick failed keyword=%s country=%s org_id=%s", keyword, country_indeed, org_id
+            )
+            errors.append({"keyword": keyword, "country": country_indeed, "error": str(exc)})
 
     last_result = {
         "total_fetched": total_fetched,
