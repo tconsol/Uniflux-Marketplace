@@ -242,12 +242,17 @@ def _row_to_scraped_job(row: pd.Series, org_id: str) -> ScrapedJob:
     )
 
 
-def _jsearch_job_to_scraped(raw: Dict[str, Any], org_id: str) -> ScrapedJob:
+def _jsearch_job_to_scraped(raw: Dict[str, Any], org_id: str, searched_country: Optional[str] = None) -> ScrapedJob:
     location_raw = raw.get("job_location")
     if not location_raw:
         location_raw = ", ".join(
             filter(None, [raw.get("job_city"), raw.get("job_state"), raw.get("job_country")])
         ) or None
+
+    # JSearch's own job_country field is unreliable (frequently null, rarely
+    # matches the searched region) — fall back to the country we explicitly
+    # queried for, since that's known-good ground truth for this batch.
+    country = raw.get("job_country") or (searched_country.upper() if searched_country else None)
 
     is_remote = bool(raw.get("job_is_remote", False))
     if raw.get("work_arrangement") == "remote":
@@ -297,7 +302,7 @@ def _jsearch_job_to_scraped(raw: Dict[str, Any], org_id: str) -> ScrapedJob:
             raw=location_raw,
             city=raw.get("job_city"),
             state=raw.get("job_state"),
-            country=raw.get("job_country"),
+            country=country,
             is_remote=is_remote,
         ),
         salary=salary,
@@ -498,7 +503,7 @@ async def search_and_store_jsearch_jobs(payload: JSearchRequest, org_id: str = G
     new_count = 0
 
     for raw in raw_jobs:
-        job = _jsearch_job_to_scraped(raw, org_id=org_id)
+        job = _jsearch_job_to_scraped(raw, org_id=org_id, searched_country=payload.country)
         job, inserted = await _upsert_job(jobs_coll, job, now)
         if inserted:
             new_count += 1
