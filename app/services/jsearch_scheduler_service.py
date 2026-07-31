@@ -27,6 +27,41 @@ async def init_jsearch_scheduler() -> None:
     if not scheduler.running:
         scheduler.start()
         logger.info("JSearch scheduler started")
+    await _restore_enabled_jsearch_jobs()
+
+
+async def _restore_enabled_jsearch_jobs() -> None:
+    # APScheduler's job store is in-memory only — every restart/redeploy
+    # wipes registered jobs even though "enabled" persists in Mongo. Without
+    # this, a scheduler left enabled goes silently dead until someone hits
+    # the /jsearch/scheduler/start endpoint again.
+    db = get_db()
+    restored = 0
+    async for state in db.jsearch_scheduler_meta.find({"enabled": True}):
+        org_id = state.get("org_id")
+        raw_config = state.get("config")
+        if not org_id or not raw_config:
+            continue
+        try:
+            config = JSearchSchedulerConfig(**raw_config)
+        except Exception:
+            logger.exception("Failed to restore jsearch scheduler config org_id=%s", org_id)
+            continue
+
+        job_id = f"{JSEARCH_SCHEDULER_JOB_ID}:{org_id}"
+        scheduler.add_job(
+            _run_jsearch_tick,
+            trigger=IntervalTrigger(minutes=config.interval_minutes),
+            id=job_id,
+            kwargs={"org_id": org_id},
+            replace_existing=True,
+            max_instances=1,
+            coalesce=True,
+        )
+        restored += 1
+
+    if restored:
+        logger.info("Restored %d enabled jsearch scheduler job(s) on startup", restored)
 
 
 async def shutdown_jsearch_scheduler() -> None:
