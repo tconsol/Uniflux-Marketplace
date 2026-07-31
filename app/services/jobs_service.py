@@ -194,12 +194,21 @@ def _parse_posted_at(value: Any) -> Optional[datetime]:
     return None
 
 
-def _row_to_scraped_job(row: pd.Series, org_id: str) -> ScrapedJob:
+_COUNTRY_INDEED_TO_CODE = {"india": "IN", "usa": "US", "united states": "US"}
+
+
+def _row_to_scraped_job(row: pd.Series, org_id: str, searched_country_indeed: Optional[str] = None) -> ScrapedJob:
+    # JobSpy's own "country" column is unreliable (frequently null/inconsistent) —
+    # fall back to the country_indeed we explicitly searched for, same fix as jsearch.
+    country = row.get("country") or _COUNTRY_INDEED_TO_CODE.get(
+        (searched_country_indeed or "").strip().lower()
+    )
+
     location = LocationModel(
         raw=row.get("location"),
         city=row.get("city"),
         state=row.get("state"),
-        country=row.get("country"),
+        country=country,
         is_remote=bool(row.get("is_remote", False)),
     )
 
@@ -437,7 +446,7 @@ async def search_and_store_jobs(payload: JobSearchRequest, org_id: str = GLOBAL_
         df = jobspy_search(single_payload)
         if not df.empty:
             for _, row in df.iterrows():
-                job = _row_to_scraped_job(row, org_id=org_id)
+                job = _row_to_scraped_job(row, org_id=org_id, searched_country_indeed=single_payload.country_indeed)
                 job, _ = await _upsert_job(jobs_coll, job, now)
                 all_jobs.append(job)
 
